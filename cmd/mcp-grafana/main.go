@@ -19,7 +19,7 @@ import (
 
 	mcpgrafana "github.com/grafana/mcp-grafana"
 	"github.com/grafana/mcp-grafana/observability"
-	"github.com/grafana/mcp-grafana/tools"
+	v84tools "github.com/grafana/mcp-grafana/tools/v84"
 	"go.opentelemetry.io/otel/semconv/v1.39.0/mcpconv"
 )
 
@@ -40,11 +40,7 @@ func maybeAddTools(s *server.MCPServer, tf func(*server.MCPServer), enabledTools
 type disabledTools struct {
 	enabledTools string
 
-	search, datasource, incident,
-	prometheus, loki, alerting,
-	dashboard, folder, oncall, asserts, sift, admin,
-	pyroscope, navigation, proxied, annotations, rendering, write,
-	examples, clickhouse, searchlogs bool
+	v84, proxied, write, v84Optional bool
 }
 
 // Configuration for the Grafana client.
@@ -60,28 +56,11 @@ type grafanaConfig struct {
 }
 
 func (dt *disabledTools) addFlags() {
-	flag.StringVar(&dt.enabledTools, "enabled-tools", "search,datasource,incident,prometheus,loki,alerting,dashboard,folder,oncall,asserts,sift,pyroscope,navigation,proxied,annotations,rendering", "A comma separated list of tools enabled for this server. Can be overwritten entirely or by disabling specific components, e.g. --disable-search.")
-	flag.BoolVar(&dt.search, "disable-search", false, "Disable search tools")
-	flag.BoolVar(&dt.datasource, "disable-datasource", false, "Disable datasource tools")
-	flag.BoolVar(&dt.incident, "disable-incident", false, "Disable incident tools")
-	flag.BoolVar(&dt.prometheus, "disable-prometheus", false, "Disable prometheus tools")
-	flag.BoolVar(&dt.loki, "disable-loki", false, "Disable loki tools")
-	flag.BoolVar(&dt.alerting, "disable-alerting", false, "Disable alerting tools")
-	flag.BoolVar(&dt.dashboard, "disable-dashboard", false, "Disable dashboard tools")
-	flag.BoolVar(&dt.folder, "disable-folder", false, "Disable folder tools")
-	flag.BoolVar(&dt.oncall, "disable-oncall", false, "Disable oncall tools")
-	flag.BoolVar(&dt.asserts, "disable-asserts", false, "Disable asserts tools")
-	flag.BoolVar(&dt.sift, "disable-sift", false, "Disable sift tools")
-	flag.BoolVar(&dt.admin, "disable-admin", false, "Disable admin tools")
-	flag.BoolVar(&dt.pyroscope, "disable-pyroscope", false, "Disable pyroscope tools")
-	flag.BoolVar(&dt.navigation, "disable-navigation", false, "Disable navigation tools")
-	flag.BoolVar(&dt.proxied, "disable-proxied", false, "Disable proxied tools (tools from external MCP servers)")
+	flag.StringVar(&dt.enabledTools, "enabled-tools", "v84", "Comma separated list of enabled tool profiles. Supported profile: v84.")
+	flag.BoolVar(&dt.v84, "disable-v84", false, "Disable Grafana 8.4.7 tool profile.")
+	flag.BoolVar(&dt.proxied, "disable-proxied", true, "Disable proxied tools (tools from external MCP servers). This is forced for Grafana 8.4.7 profile.")
 	flag.BoolVar(&dt.write, "disable-write", false, "Disable write tools (create/update operations)")
-	flag.BoolVar(&dt.annotations, "disable-annotations", false, "Disable annotation tools")
-	flag.BoolVar(&dt.rendering, "disable-rendering", false, "Disable rendering tools (panel/dashboard image export)")
-	flag.BoolVar(&dt.examples, "disable-examples", false, "Disable query examples tools")
-	flag.BoolVar(&dt.clickhouse, "disable-clickhouse", false, "Disable ClickHouse tools")
-	flag.BoolVar(&dt.searchlogs, "disable-searchlogs", false, "Disable search logs tools")
+	flag.BoolVar(&dt.v84Optional, "enable-v84-optional-tools", false, "Enable optional Grafana 8.4.7 tools.")
 }
 
 func (gc *grafanaConfig) addFlags() {
@@ -97,25 +76,13 @@ func (gc *grafanaConfig) addFlags() {
 func (dt *disabledTools) addTools(s *server.MCPServer) {
 	enabledTools := strings.Split(dt.enabledTools, ",")
 	enableWriteTools := !dt.write
-	maybeAddTools(s, tools.AddSearchTools, enabledTools, dt.search, "search")
-	maybeAddTools(s, tools.AddDatasourceTools, enabledTools, dt.datasource, "datasource")
-	maybeAddTools(s, func(mcp *server.MCPServer) { tools.AddIncidentTools(mcp, enableWriteTools) }, enabledTools, dt.incident, "incident")
-	maybeAddTools(s, tools.AddPrometheusTools, enabledTools, dt.prometheus, "prometheus")
-	maybeAddTools(s, tools.AddLokiTools, enabledTools, dt.loki, "loki")
-	maybeAddTools(s, func(mcp *server.MCPServer) { tools.AddAlertingTools(mcp, enableWriteTools) }, enabledTools, dt.alerting, "alerting")
-	maybeAddTools(s, func(mcp *server.MCPServer) { tools.AddDashboardTools(mcp, enableWriteTools) }, enabledTools, dt.dashboard, "dashboard")
-	maybeAddTools(s, func(mcp *server.MCPServer) { tools.AddFolderTools(mcp, enableWriteTools) }, enabledTools, dt.folder, "folder")
-	maybeAddTools(s, tools.AddOnCallTools, enabledTools, dt.oncall, "oncall")
-	maybeAddTools(s, tools.AddAssertsTools, enabledTools, dt.asserts, "asserts")
-	maybeAddTools(s, func(mcp *server.MCPServer) { tools.AddSiftTools(mcp, enableWriteTools) }, enabledTools, dt.sift, "sift")
-	maybeAddTools(s, tools.AddAdminTools, enabledTools, dt.admin, "admin")
-	maybeAddTools(s, tools.AddPyroscopeTools, enabledTools, dt.pyroscope, "pyroscope")
-	maybeAddTools(s, tools.AddNavigationTools, enabledTools, dt.navigation, "navigation")
-	maybeAddTools(s, func(mcp *server.MCPServer) { tools.AddAnnotationTools(mcp, enableWriteTools) }, enabledTools, dt.annotations, "annotations")
-	maybeAddTools(s, tools.AddRenderingTools, enabledTools, dt.rendering, "rendering")
-	maybeAddTools(s, tools.AddExamplesTools, enabledTools, dt.examples, "examples")
-	maybeAddTools(s, tools.AddClickHouseTools, enabledTools, dt.clickhouse, "clickhouse")
-	maybeAddTools(s, tools.AddSearchLogsTools, enabledTools, dt.searchlogs, "searchlogs")
+	maybeAddTools(
+		s,
+		func(mcp *server.MCPServer) { v84tools.AddV84Tools(mcp, enableWriteTools, dt.v84Optional) },
+		enabledTools,
+		dt.v84,
+		"v84",
+	)
 }
 
 func newServer(transport string, dt disabledTools, obs *observability.Observability) (*server.MCPServer, *mcpgrafana.ToolManager) {
@@ -162,24 +129,18 @@ func newServer(transport string, dt disabledTools, obs *observability.Observabil
 
 	s := server.NewMCPServer("mcp-grafana", mcpgrafana.Version(),
 		server.WithInstructions(`
-This server provides access to your Grafana instance and the surrounding ecosystem.
+This server exposes Grafana 8.4.7 MCP tools.
 
-Available Capabilities:
-- Dashboards: Search, retrieve, update, and create dashboards. Extract panel queries and datasource information.
-- Datasources: List and fetch details for datasources.
-- Prometheus & Loki: Run PromQL and LogQL queries, retrieve metric/log metadata, and explore label names/values.
-- ClickHouse: Query ClickHouse datasources via Grafana with macro and variable substitution support.
-- Incidents: Search, create, update, and resolve incidents in Grafana Incident.
-- Sift Investigations: Start and manage Sift investigations, analyze logs/traces, find error patterns, and detect slow requests.
-- Alerting: List and fetch alert rules and notification contact points.
-- OnCall: View and manage on-call schedules, shifts, teams, and users.
-- Admin: List teams and perform administrative tasks.
-- Pyroscope: Profile applications and fetch profiling data.
-- Navigation: Generate deeplink URLs for Grafana resources like dashboards, panels, and Explore queries.
-- Rendering: Export dashboard panels or full dashboards as PNG images (requires Grafana Image Renderer plugin).
-- Proxied Tools: Access tools from external MCP servers (like Tempo) through dynamic discovery.
+Default capabilities:
+- Health, current user, current org.
+- Dashboard search and dashboard CRUD via upsert.
+- Folder list/create/update.
+- Datasource list/get/resolve and generic datasource querying via /api/tsdb/query.
+- Annotation list/create/patch.
+- Legacy alerting reads: /api/alerts and /api/alert-notifications.
+- Organization reads: list org users and teams.
 
-Note that some of these capabilities may be disabled. Do not try to use features that are not available via tools.
+Use only tools returned by list_tools. Some tools can be disabled via flags.
 `),
 		server.WithHooks(hooks),
 	)
@@ -431,6 +392,12 @@ func main() {
 		obs.NetworkTransport = mcpconv.NetworkTransportPipe
 	case "sse", "streamable-http":
 		obs.NetworkTransport = mcpconv.NetworkTransportTCP
+	}
+
+	// Grafana 8.4.7 profile does not support proxied datasource MCP tools.
+	if !dt.proxied {
+		slog.Warn("proxied tools are not supported in v84 profile; forcing disable-proxied=true")
+		dt.proxied = true
 	}
 
 	if err := run(transport, *addr, *basePath, *endpointPath, parseLevel(*logLevel), dt, grafanaConfig, tls, obs); err != nil {
