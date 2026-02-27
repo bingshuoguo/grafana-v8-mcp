@@ -406,6 +406,13 @@ func extractKeyGrafanaInfoFromReq(req *http.Request) (grafanaUrl, apiKey string,
 	username, password, _ := req.BasicAuth()
 
 	grafanaUrl, apiKey = urlAndAPIKeyFromHeaders(req)
+	if grafanaUrl != "" {
+		parsedURL, err := url.Parse(grafanaUrl)
+		if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
+			slog.Warn("Invalid X-Grafana-URL header value, falling back to environment/default", "error", err)
+			grafanaUrl = ""
+		}
+	}
 	// If anything is missing, check if we can get it from the environment
 	if grafanaUrl == "" {
 		grafanaUrl = eUrl
