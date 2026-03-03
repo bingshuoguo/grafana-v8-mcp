@@ -365,7 +365,12 @@ func getDashboardVersions(ctx context.Context, args GetDashboardVersionsRequest)
 		return nil, err
 	}
 
-	dashID, ok := anyToInt64(dbResp.Meta["id"])
+	// Grafana 8.4.7 returns numeric dashboard id under dashboard.id.
+	// Keep meta.id as a compatibility fallback for non-standard payloads.
+	dashID, ok := anyToInt64(dbResp.Dashboard["id"])
+	if !ok || dashID == 0 {
+		dashID, ok = anyToInt64(dbResp.Meta["id"])
+	}
 	if !ok || dashID == 0 {
 		return nil, fmt.Errorf("could not determine numeric dashboard ID for uid %q", args.UID)
 	}

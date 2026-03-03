@@ -5,6 +5,8 @@ package v84
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -41,6 +43,27 @@ func TestGetDashboardVersionsValidation(t *testing.T) {
 	_, err := getDashboardVersions(nil, GetDashboardVersionsRequest{UID: ""})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "uid is required")
+}
+
+func TestGetDashboardVersionsUsesDashboardID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/dashboards/uid/test-uid":
+			_, _ = w.Write([]byte(`{"dashboard":{"id":123,"uid":"test-uid"},"meta":{"slug":"x"}}`))
+		case "/api/dashboards/id/123/versions":
+			_, _ = w.Write([]byte(`[{"id":1,"dashboardId":123,"version":7,"parentVersion":6,"restoredFrom":0,"created":"2026-03-03T00:00:00Z","createdBy":"tester"}]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	got, err := getDashboardVersions(newV84TestContext(srv), GetDashboardVersionsRequest{UID: "test-uid"})
+	require.NoError(t, err)
+	require.Len(t, got.Versions, 1)
+	assert.Equal(t, 123, got.Versions[0].DashboardID)
+	assert.Equal(t, 7, got.Versions[0].Version)
 }
 
 // ─── query_datasource_expressions ─────────────────────────────────────────────
@@ -82,6 +105,60 @@ func TestQueryDatasourceExpressionsValidation(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "queries is required")
 	})
+}
+
+func TestQueryDatasourceExpressionsFallbackToTSDB(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/datasources":
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"id": 100, "uid": "uid-100", "name": "Prom Main", "type": "prometheus"},
+			})
+		case "/api/datasources/100":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id": 100, "uid": "uid-100", "name": "Prom Main", "type": "prometheus",
+			})
+		case "/api/ds/query":
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"message":"bad request"}`))
+		case "/api/tsdb/query":
+			var body map[string]any
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+			queries, ok := body["queries"].([]any)
+			require.True(t, ok)
+			require.Len(t, queries, 1)
+			q0, ok := queries[0].(map[string]any)
+			require.True(t, ok)
+			assert.Equal(t, float64(100), q0["datasourceId"])
+			_, _ = w.Write([]byte(`{"results":{"A":{"status":200}}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	got, err := queryDatasourceExpressions(newV84TestContext(srv), QueryDatasourceExpressionsRequest{
+		From: "now-1h",
+		To:   "now",
+		Queries: []map[string]any{
+			{
+				"refId": "A",
+				"expr":  "vector(1)",
+				"datasource": map[string]any{
+					"uid":  "uid-100",
+					"type": "prometheus",
+				},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.NotEmpty(t, got.Raw)
+	if assert.NotNil(t, got.Results) {
+		_, ok := got.Results["A"]
+		assert.True(t, ok)
+	}
 }
 
 // ─── get_firing_alerts ────────────────────────────────────────────────────────

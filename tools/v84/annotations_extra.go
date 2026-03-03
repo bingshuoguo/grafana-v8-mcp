@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
@@ -158,7 +159,13 @@ func getAnnotationTags(ctx context.Context, args GetAnnotationTagsRequest) (*Get
 	}
 	query.Set("limit", strconv.FormatInt(limit, 10))
 
-	respBody, statusCode, err := doAPIRequest(ctx, "GET", "/annotations/tags", query, nil)
+	// Tag aggregation can be slow on large Grafana instances, so use a larger timeout and one retry on timeout.
+	reqCtx := withGrafanaTimeout(ctx, 30*time.Second)
+	respBody, statusCode, err := doAPIRequest(reqCtx, "GET", "/annotations/tags", query, nil)
+	if err != nil && isTimeoutError(err) {
+		retryCtx := withGrafanaTimeout(ctx, 60*time.Second)
+		respBody, statusCode, err = doAPIRequest(retryCtx, "GET", "/annotations/tags", query, nil)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("get annotation tags: %w", wrapRawAPIError(statusCode, respBody, err))
 	}
