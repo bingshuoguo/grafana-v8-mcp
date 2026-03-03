@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/go-openapi/runtime"
 	httptransport "github.com/go-openapi/runtime/client"
@@ -225,6 +227,30 @@ func doAPIRequest(ctx context.Context, method, path string, query url.Values, bo
 	}
 
 	return respBody, resp.StatusCode, nil
+}
+
+func withGrafanaTimeout(ctx context.Context, timeout time.Duration) context.Context {
+	if timeout <= 0 {
+		return ctx
+	}
+	cfg := mcpgrafana.GrafanaConfigFromContext(ctx)
+	if cfg.Timeout >= timeout {
+		return ctx
+	}
+	cfg.Timeout = timeout
+	return mcpgrafana.WithGrafanaConfig(ctx, cfg)
+}
+
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "timeout") || strings.Contains(msg, "deadline exceeded")
 }
 
 func decodeAPIResponse[T any](ctx context.Context, method, path string, query url.Values, body any) (T, error) {

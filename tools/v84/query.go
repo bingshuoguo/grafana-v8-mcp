@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
@@ -156,6 +157,15 @@ func queryDatasourceExpressions(ctx context.Context, args QueryDatasourceExpress
 
 	respBody, statusCode, err := doAPIRequest(ctx, "POST", "/ds/query", nil, requestBody)
 	if err != nil {
+		// Grafana 8.4.x deployments often reject /api/ds/query for non-expression payloads.
+		// Fall back to legacy /api/tsdb/query for compatibility.
+		if shouldFallbackToTSDB(statusCode) {
+			fallbackResp, fallbackErr := fallbackExpressionsToTSDB(ctx, args, normalizedQueries)
+			if fallbackErr == nil {
+				return fallbackResp, nil
+			}
+			return nil, fmt.Errorf("query datasource expressions: %w (fallback /tsdb/query failed: %v)", wrapRawAPIError(statusCode, respBody, err), fallbackErr)
+		}
 		return nil, fmt.Errorf("query datasource expressions: %w", wrapRawAPIError(statusCode, respBody, err))
 	}
 
@@ -172,6 +182,100 @@ func queryDatasourceExpressions(ctx context.Context, args QueryDatasourceExpress
 	}
 
 	return response, nil
+}
+
+func shouldFallbackToTSDB(statusCode int) bool {
+	switch statusCode {
+	case 400, 404, 405, 501:
+		return true
+	default:
+		return false
+	}
+}
+
+func fallbackExpressionsToTSDB(ctx context.Context, args QueryDatasourceExpressionsRequest, normalizedQueries []map[string]any) (*QueryDatasourceExpressionsResponse, error) {
+	tsdbQueries, err := normalizeQueriesForTSDB(ctx, normalizedQueries)
+	if err != nil {
+		return nil, err
+	}
+
+	tsdbResp, err := queryDatasource(ctx, QueryDatasourceRequest{
+		From:       args.From,
+		To:         args.To,
+		Datasource: args.Datasource,
+		Queries:    tsdbQueries,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	resp := &QueryDatasourceExpressionsResponse{Raw: tsdbResp.Raw}
+	if len(tsdbResp.Responses) > 0 {
+		resp.Results = make(map[string]json.RawMessage, len(tsdbResp.Responses))
+		for refID, v := range tsdbResp.Responses {
+			b, marshalErr := json.Marshal(v)
+			if marshalErr != nil {
+				continue
+			}
+			resp.Results[refID] = json.RawMessage(b)
+		}
+	}
+	return resp, nil
+}
+
+func normalizeQueriesForTSDB(ctx context.Context, queries []map[string]any) ([]map[string]any, error) {
+	out := make([]map[string]any, 0, len(queries))
+	for _, q := range queries {
+		copyQ := make(map[string]any, len(q))
+		for k, v := range q {
+			copyQ[k] = v
+		}
+
+		if _, exists := copyQ["datasourceId"]; !exists {
+			if dsRaw, hasDS := copyQ["datasource"]; hasDS {
+				dsRef, ok := datasourceRefFromAny(dsRaw)
+				if !ok {
+					return nil, fmt.Errorf("invalid query datasource field for refId %v", copyQ["refId"])
+				}
+				resolved, err := resolveDatasourceRef(ctx, dsRef)
+				if err != nil {
+					return nil, fmt.Errorf("resolve query datasource for refId %v: %w", copyQ["refId"], err)
+				}
+				copyQ["datasourceId"] = resolved.Datasource.ID
+			}
+		}
+		delete(copyQ, "datasource")
+		out = append(out, copyQ)
+	}
+	return out, nil
+}
+
+func datasourceRefFromAny(v any) (DatasourceRef, bool) {
+	switch ds := v.(type) {
+	case map[string]any:
+		ref := DatasourceRef{}
+		if id, ok := anyToInt64(ds["id"]); ok && id > 0 {
+			ref.ID = &id
+		}
+		if uid, ok := ds["uid"].(string); ok {
+			ref.UID = strings.TrimSpace(uid)
+		}
+		if name, ok := ds["name"].(string); ok {
+			ref.Name = strings.TrimSpace(name)
+		}
+		if ref.ID != nil || ref.UID != "" || ref.Name != "" {
+			return ref, true
+		}
+	case map[string]string:
+		ref := DatasourceRef{
+			UID:  strings.TrimSpace(ds["uid"]),
+			Name: strings.TrimSpace(ds["name"]),
+		}
+		if ref.UID != "" || ref.Name != "" {
+			return ref, true
+		}
+	}
+	return DatasourceRef{}, false
 }
 
 var QueryDatasourceExpressionsTool = mcpgrafana.MustTool(

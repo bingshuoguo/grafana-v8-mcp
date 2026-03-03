@@ -15,10 +15,10 @@ import (
 )
 
 const (
-	v84CHDatasourceType   = "grafana-clickhouse-datasource"
-	v84CHDefaultLimit     = 100
-	v84CHMaxLimit         = 1000
-	v84CHFormatTable      = 1
+	v84CHDatasourceType = "grafana-clickhouse-datasource"
+	v84CHDefaultLimit   = 100
+	v84CHMaxLimit       = 1000
+	v84CHFormatTable    = 1
 )
 
 // resolveClickHouseUID validates the datasource type and returns its UID.
@@ -220,7 +220,7 @@ func queryClickHouse(ctx context.Context, args QueryClickHouseRequest) (*QueryCl
 
 	resp, err := execCHSQL(ctx, uid, processed, fromTime, toTime)
 	if err != nil {
-		return nil, err
+		return nil, enhanceClickHouseError(err, args.DatasourceUID)
 	}
 
 	columns, rows, err := processCHResponse(resp)
@@ -233,6 +233,17 @@ func queryClickHouse(ctx context.Context, args QueryClickHouseRequest) (*QueryCl
 		RowCount:       len(rows),
 		ProcessedQuery: processed,
 	}, nil
+}
+
+func enhanceClickHouseError(err error, datasourceUID string) error {
+	if err == nil {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "query data error") {
+		return fmt.Errorf("%w. Hint: datasourceUid=%s backend query failed; verify ClickHouse datasource permissions, plugin health, and upstream ClickHouse connectivity", err, datasourceUID)
+	}
+	return err
 }
 
 var QueryClickHouseTool = mcpgrafana.MustTool(
