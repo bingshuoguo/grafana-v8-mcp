@@ -99,3 +99,90 @@ var QueryDatasourceTool = mcpgrafana.MustTool(
 	mcp.WithReadOnlyHintAnnotation(true),
 	mcp.WithIdempotentHintAnnotation(true),
 )
+
+// --- query_datasource_expressions ---
+
+type QueryDatasourceExpressionsRequest struct {
+	From       string           `json:"from" jsonschema:"required,description=From time\\, e.g. now-1h"`
+	To         string           `json:"to" jsonschema:"required,description=To time\\, e.g. now"`
+	Queries    []map[string]any `json:"queries" jsonschema:"required,description=Query list; each should include datasource:{uid\\,type} and refId"`
+	Datasource *DatasourceRef   `json:"datasource,omitempty" jsonschema:"description=Optional datasource reference; auto-injected into queries that lack a datasource field"`
+}
+
+type QueryDatasourceExpressionsResponse struct {
+	Raw     json.RawMessage            `json:"raw,omitempty"`
+	Results map[string]json.RawMessage `json:"results,omitempty"`
+}
+
+func queryDatasourceExpressions(ctx context.Context, args QueryDatasourceExpressionsRequest) (*QueryDatasourceExpressionsResponse, error) {
+	if args.From == "" || args.To == "" {
+		return nil, fmt.Errorf("from and to are required")
+	}
+	if len(args.Queries) == 0 {
+		return nil, fmt.Errorf("queries is required")
+	}
+
+	var dsRef map[string]string
+	if args.Datasource != nil {
+		resolved, err := resolveDatasourceRef(ctx, *args.Datasource)
+		if err != nil {
+			return nil, fmt.Errorf("resolve datasource: %w", err)
+		}
+		dsRef = map[string]string{
+			"uid":  resolved.Datasource.UID,
+			"type": resolved.Datasource.Type,
+		}
+	}
+
+	normalizedQueries := make([]map[string]any, 0, len(args.Queries))
+	for _, q := range args.Queries {
+		copyQ := make(map[string]any, len(q))
+		for k, v := range q {
+			copyQ[k] = v
+		}
+		if dsRef != nil {
+			if _, exists := copyQ["datasource"]; !exists {
+				copyQ["datasource"] = dsRef
+			}
+		}
+		normalizedQueries = append(normalizedQueries, copyQ)
+	}
+
+	requestBody := map[string]any{
+		"queries": normalizedQueries,
+		"from":    args.From,
+		"to":      args.To,
+	}
+
+	respBody, statusCode, err := doAPIRequest(ctx, "POST", "/ds/query", nil, requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("query datasource expressions: %w", wrapRawAPIError(statusCode, respBody, err))
+	}
+
+	response := &QueryDatasourceExpressionsResponse{Raw: json.RawMessage(respBody)}
+
+	var parsed map[string]json.RawMessage
+	if err := json.Unmarshal(respBody, &parsed); err == nil {
+		if rawResults, ok := parsed["results"]; ok {
+			var resultsMap map[string]json.RawMessage
+			if err := json.Unmarshal(rawResults, &resultsMap); err == nil {
+				response.Results = resultsMap
+			}
+		}
+	}
+
+	return response, nil
+}
+
+var QueryDatasourceExpressionsTool = mcpgrafana.MustTool(
+	"query_datasource_expressions",
+	`Query datasource using Grafana's unified /api/ds/query endpoint (supports expressions and data frames).
+
+Each query in the queries array should include "datasource": {"uid": "...", "type": "..."} and "refId".
+Alternatively provide a datasource parameter to auto-inject into all queries that lack a datasource field.
+Returns raw data frames response; use query_datasource for the legacy tsdb format.`,
+	queryDatasourceExpressions,
+	mcp.WithTitleAnnotation("Query datasource expressions"),
+	mcp.WithReadOnlyHintAnnotation(true),
+	mcp.WithIdempotentHintAnnotation(true),
+)
