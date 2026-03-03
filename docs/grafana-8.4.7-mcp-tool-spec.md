@@ -85,6 +85,9 @@
 | `get_datasource` | `GET by id/uid/name` | R | 单 datasource 详情 |
 | `resolve_datasource_ref` | 组合接口 | R | 统一解析 datasource 引用 |
 | `query_datasource` | `POST /api/tsdb/query` | R | 通用查询（主链路） |
+| `query_prometheus` | `GET /api/datasources/proxy/{id}/api/v1/query(_range)` | R | PromQL 查询（range/instant） |
+| `list_prometheus_label_values` | `GET /api/datasources/proxy/{id}/api/v1/label/{label}/values` | R | 查询标签值（模板变量解析） |
+| `list_prometheus_metric_names` | `GET /api/datasources/proxy/{id}/api/v1/label/__name__/values` | R | 指标名发现（regex + 分页） |
 | `get_annotations` | `GET /api/annotations` | R | 注解查询 |
 | `create_annotation` | `POST /api/annotations` | W | 创建注解 |
 | `patch_annotation` | `PATCH /api/annotations/{id}` | W | 局部更新注解 |
@@ -627,6 +630,137 @@
 }
 ```
 
+### 6.21 `query_prometheus`
+
+```json
+{
+  "name": "query_prometheus",
+  "inputSchema": {
+    "type": "object",
+    "required": ["expr", "start"],
+    "properties": {
+      "datasource": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "uid": { "type": "string" },
+          "name": { "type": "string" }
+        }
+      },
+      "expr": { "type": "string", "description": "PromQL expression" },
+      "start": { "type": "string", "description": "Start time: 'now-1h', 'now', or RFC3339" },
+      "end": { "type": "string", "description": "End time (default: now)" },
+      "step": { "type": "string", "description": "Step interval (default: auto). E.g. '30s', '1m', '1d'" },
+      "queryType": { "type": "string", "enum": ["range", "instant"], "default": "range" }
+    }
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "resultType": { "type": "string", "enum": ["matrix", "vector", "scalar", "string"] },
+      "result": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "metric": {
+              "type": "object",
+              "additionalProperties": { "type": "string" }
+            },
+            "values": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "time": { "type": "string" },
+                  "value": { "type": "string" }
+                }
+              }
+            },
+            "value": {
+              "type": "object",
+              "properties": {
+                "time": { "type": "string" },
+                "value": { "type": "string" }
+              }
+            }
+          }
+        }
+      },
+      "hints": { "type": "array", "items": { "type": "string" } }
+    }
+  }
+}
+```
+
+### 6.22 `list_prometheus_label_values`
+
+```json
+{
+  "name": "list_prometheus_label_values",
+  "inputSchema": {
+    "type": "object",
+    "required": ["labelName"],
+    "properties": {
+      "datasource": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "uid": { "type": "string" },
+          "name": { "type": "string" }
+        }
+      },
+      "labelName": { "type": "string" },
+      "start": { "type": "string" },
+      "end": { "type": "string" },
+      "limit": { "type": "integer", "default": 100 }
+    }
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "labelName": { "type": "string" },
+      "values": { "type": "array", "items": { "type": "string" } },
+      "total": { "type": "integer" },
+      "truncated": { "type": "boolean" }
+    }
+  }
+}
+```
+
+### 6.23 `list_prometheus_metric_names`
+
+```json
+{
+  "name": "list_prometheus_metric_names",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "datasource": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "uid": { "type": "string" },
+          "name": { "type": "string" }
+        }
+      },
+      "regex": { "type": "string" },
+      "limit": { "type": "integer", "default": 50 },
+      "page": { "type": "integer", "default": 1 }
+    }
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "metrics": { "type": "array", "items": { "type": "string" } },
+      "total": { "type": "integer" },
+      "page": { "type": "integer" },
+      "hasMore": { "type": "boolean" }
+    }
+  }
+}
+```
+
 ---
 
 ## 7. 落地顺序建议
@@ -634,14 +768,16 @@
 1. 先落地 `health/user/org/search/dashboard/folder/datasource`。
 2. 加入 `resolve_datasource_ref`，统一 datasource 解析。
 3. 实现 `query_datasource`（`/api/tsdb/query`）。
-4. 实现 annotations。
-5. 实现 legacy alerting。
-6. 第二阶段再接 `query_datasource_expressions` 与 unified alerting 扩展。
+4. 实现 Prometheus 工具链：`list_prometheus_metric_names` -> `list_prometheus_label_values` -> `query_prometheus`。
+5. 实现 annotations。
+6. 实现 legacy alerting。
+7. 第二阶段再接 `query_datasource_expressions` 与 unified alerting 扩展。
 
 ---
 
 ## 8. 兼容性备注
 
 - 8.4.7 下不假设所有 `uid` 路由都可用，datasource 统一走 ID-first。
+- Prometheus 查询统一走 datasource proxy：`/api/datasources/proxy/{id}/api/v1/*`。
 - `query_datasource` 与 `query_datasource_expressions` 分离，避免隐式回退导致行为不确定。
 - 本文档是 **v8.4.7 默认契约**；非本文档工具名不再视为默认可用。
