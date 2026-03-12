@@ -98,10 +98,14 @@ def grafana_headers():
 @pytest.fixture
 async def mcp_client(mcp_transport, mcp_url, grafana_env, grafana_headers):
     if mcp_transport == "stdio":
-        enabled_tools = "search,datasource,incident,prometheus,loki,alerting,dashboard,folder,oncall,asserts,sift,pyroscope,navigation,proxied,annotations,rendering,admin,clickhouse"
         params = StdioServerParameters(
             command=os.environ.get("MCP_GRAFANA_PATH", "../dist/mcp-grafana"),
-            args=["--debug", "--log-level", "debug", "--enabled-tools", enabled_tools],
+            args=[
+                "--debug",
+                "--log-level",
+                "debug",
+                "--enable-v84-optional-tools",
+            ],
             env=grafana_env,
         )
         async with stdio_client(params) as (read, write):

@@ -4,8 +4,7 @@
 `mcp-grafana` 是一个 MCP（Model Context Protocol）服务端，作为 LLM 客户端与 Grafana 生态之间的适配层。  
 它统一暴露工具（tools），将请求路由到：
 - Grafana HTTP API（dashboard/search/datasource/alerting 等）
-- Grafana 插件能力（Incident/OnCall/Sift/Asserts 等）
-- 可选的 proxied MCP datasource（当前内置 tempo）
+- 可选的 proxied MCP datasource 基础设施（代码仍保留，但当前 v84 运行时默认强制关闭）
 
 核心入口在 `cmd/mcp-grafana/main.go`，核心基础设施在根目录 `mcpgrafana.go`、`session.go`、`proxied_*.go`、`observability/`。
 
@@ -25,15 +24,13 @@
 graph TD
   A[CLI/main.go] --> B[MCP Server]
   A --> C[Observability Setup]
-  B --> D[Tool Categories tools/*]
-  B --> E[Hooks: Session + Proxied + Metrics]
+  B --> D[tools/* v84 Profile]
+  B --> E[Hooks: Session + Metrics]
   E --> F[SessionManager]
-  E --> G[ToolManager]
+  E --> G[ToolManager / Proxied Infra]
   G --> H[ProxiedClient]
-  D --> I[GrafanaClient from Context]
-  D --> J[IncidentClient from Context]
+  D --> I[Grafana HTTP Client from Context]
   I --> K[Grafana HTTP API]
-  J --> L[Grafana Incident API]
   H --> M[Datasource MCP Endpoint]
 ```
 
@@ -46,7 +43,7 @@ graph TD
    - 基础 hooks（session 注册/销毁）
    - proxied hooks（`OnBeforeListTools` / `OnBeforeCallTool`）
    - 合并观测 hooks（`observability.MergeHooks`）
-5. 按 category 注册工具（`disabledTools.addTools` -> `tools.Add*Tools`）。
+5. 注册当前唯一默认工具集（`disabledTools.addTools` -> `tools.AddV84Tools`）。
 6. 根据 transport 启动 stdio/SSE/streamable HTTP 服务，并暴露 `/healthz`、可选 `/metrics`。
 
 ## 5. Context 与客户端注入
@@ -56,7 +53,6 @@ graph TD
 - 注入对象：
   - `GrafanaConfig`（URL、token/basic auth、OrgID、TLS、extra headers、timeout）
   - `GrafanaHTTPAPI` client
-  - `incident-go` client
 - 传输增强：TLS、User-Agent、OrgID header、额外 headers、OTel HTTP tracing。
 
 ## 6. Tool 子系统
@@ -64,17 +60,13 @@ graph TD
   - 基于参数 struct 自动反射 JSON Schema
   - 统一执行包装与错误转换（支持 `HardError`）
   - 每次 `tools/call` 自动创建 OTel span
-- `tools/` 目录按能力拆分（search、dashboard、datasource、prometheus、loki、clickhouse、alerting、annotations 等）。
-- 写操作由 `--disable-write` 统一控制，`Add*Tools` 内按 `enableWriteTools` 选择性注册写工具。
+- `tools/` 目录按能力拆分（search、dashboard、datasource、prometheus、loki、clickhouse、alerting、annotations 等），但都属于同一个 v84 profile。
+- 写操作由 `--disable-write` 统一控制，`AddV84Tools` 内按 `enableWriteTools` 选择性注册写工具。
 
 ## 7. Proxied Tools 子系统
-- 发现：`discoverMCPDatasources` 列举 datasources，筛选 `mcpEnabledDatasources`（当前 tempo）。
-- 探测：并发请求 `/api/datasources/proxy/uid/{uid}/api/mcp` 判定是否启用远端 MCP。
-- 连接：`NewProxiedClient` 建立 streamable HTTP MCP client，并缓存远端 tool 列表。
-- 注册：
-  - `stdio`：`InitializeAndRegisterServerTools`，服务级一次性注册。
-  - `sse/http`：`InitializeAndRegisterProxiedTools`，按 session 初始化并注册 session tools。
-- 转发：`ProxiedToolHandler` 解析 `datasourceUid`，路由到对应远端工具。
+- 代码库仍保留 proxied datasource MCP 的发现、连接和转发基础设施。
+- 但在当前 v84 发行路径中，`cmd/mcp-grafana/main.go` 会强制关闭 proxied tools，因此它不是默认产品能力。
+- 如果未来重新启用，这部分仍通过 `discoverMCPDatasources`、`NewProxiedClient` 和 `ProxiedToolHandler` 完成发现与转发。
 
 ## 8. 可观测性设计
 `observability/` 提供：
@@ -104,6 +96,6 @@ sequenceDiagram
 ```
 
 ## 10. 扩展建议
-- 新增 tool 分类：在 `tools/<category>.go` 实现 `Add<Category>Tools`，并在 `main.go` 的 `disabledTools` 与 `addTools` 中注册开关。
-- 新增 proxied datasource：在 `mcpEnabledDatasources` 增加 type 与 endpointPath，并补充集成测试。
+- 新增 v84 tool：直接在 `tools/` 下新增能力文件，并在 `AddV84Tools` 中接入注册。
+- 若重新启用 proxied datasource：在 `mcpEnabledDatasources` 增加 type 与 endpointPath，并补充集成测试。
 - 新增 context 能力：以 `Compose*ContextFuncs` 方式插拔，避免侵入工具实现。

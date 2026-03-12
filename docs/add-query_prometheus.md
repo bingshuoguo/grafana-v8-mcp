@@ -2,8 +2,8 @@
 
 ## 一、整体架构
 
-- **新增文件**：`tools/v84/prometheus.go`（约 300 行）
-- **修改文件**：`tools/v84/registry.go`（3 行追加）
+- **新增文件**：`tools/prometheus.go`（约 300 行）
+- **修改文件**：`tools/registry.go`（3 行追加）
 
 所有新工具复用现有基础设施：
 
@@ -239,7 +239,7 @@ type ListPrometheusMetricNamesResponse struct {
 
 ## 五、Prometheus 响应解析结构
 
-供内部 `json.Unmarshal` 使用（`tools/v84/prometheus.go` 内部类型，不导出）：
+供内部 `json.Unmarshal` 使用（`tools/prometheus.go` 内部类型，不导出）：
 
 ```go
 type promResponse struct {
@@ -279,7 +279,7 @@ func convertSample(raw [2]interface{}) (PromSample, error) {
 
 ## 六、registry.go 变更
 
-在 `tools/v84/registry.go` 中追加 3 行：
+在 `tools/registry.go` 中追加 3 行：
 
 ```go
 func AddV84Tools(m *server.MCPServer, enableWriteTools, enableOptionalTools bool) {
@@ -337,7 +337,7 @@ var ListPrometheusMetricNamesTool = mcpgrafana.MustTool(
 
 ## 八、单元测试方案
 
-参照 `tools/v84/v84_unit_test.go` 现有模式（build tag `//go:build unit`），新增：
+参照 `tools/v84_unit_test.go` 现有模式（build tag `//go:build unit`），新增：
 
 | 测试用例 | 覆盖范围 |
 |----------|----------|
@@ -354,7 +354,7 @@ var ListPrometheusMetricNamesTool = mcpgrafana.MustTool(
 
 | 维度 | 设计决策 |
 |------|----------|
-| 新增文件 | 1 个：`tools/v84/prometheus.go` |
+| 新增文件 | 1 个：`tools/prometheus.go` |
 | 新增工具 | 3 个（P0/P2/P3） |
 | 外部依赖 | 零新增，复用现有 `doAPIRequest` / `resolveDatasourceRef` |
 | 时间格式 | 入参支持相对时间和 RFC3339；返回值统一转为 RFC3339（LLM 可读） |

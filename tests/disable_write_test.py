@@ -21,7 +21,7 @@ async def test_disable_write_flag_disables_write_tools(grafana_env):
     """Test that --disable-write flag disables write tools."""
     params = StdioServerParameters(
         command=os.environ.get("MCP_GRAFANA_PATH", "../dist/mcp-grafana"),
-        args=["--disable-write"],
+        args=["--disable-write", "--enable-v84-optional-tools"],
         env=grafana_env,
     )
     async with stdio_client(params) as (read, write):
@@ -34,10 +34,10 @@ async def test_disable_write_flag_disables_write_tools(grafana_env):
             
             # Verify write tools are NOT present
             write_tools = [
+                "upsert_dashboard",
                 "update_dashboard",
                 "create_folder",
-                "create_incident",
-                "add_activity_to_incident",
+                "update_folder",
                 "create_alert_rule",
                 "update_alert_rule",
                 "delete_alert_rule",
@@ -45,8 +45,7 @@ async def test_disable_write_flag_disables_write_tools(grafana_env):
                 "create_graphite_annotation",
                 "update_annotation",
                 "patch_annotation",
-                "find_error_pattern_logs",
-                "find_slow_requests",
+                "delete_annotation",
             ]
             
             for tool in write_tools:
@@ -58,9 +57,7 @@ async def test_disable_write_flag_disables_write_tools(grafana_env):
                 "list_alert_rules",
                 "get_alert_rule_by_uid",
                 "list_contact_points",
-                "list_incidents",
-                "get_incident",
-                "get_sift_investigation",
+                "get_firing_alerts",
                 "get_annotations",
                 "get_annotation_tags",
             ]
@@ -73,7 +70,7 @@ async def test_without_disable_write_flag_enables_write_tools(grafana_env):
     """Test that without --disable-write flag, write tools are enabled."""
     params = StdioServerParameters(
         command=os.environ.get("MCP_GRAFANA_PATH", "../dist/mcp-grafana"),
-        args=[],  # No --disable-write flag
+        args=["--enable-v84-optional-tools"],
         env=grafana_env,
     )
     async with stdio_client(params) as (read, write):
@@ -86,10 +83,10 @@ async def test_without_disable_write_flag_enables_write_tools(grafana_env):
             
             # Verify write tools ARE present
             write_tools = [
+                "upsert_dashboard",
                 "update_dashboard",
                 "create_folder",
-                "create_incident",
-                "add_activity_to_incident",
+                "update_folder",
                 "create_alert_rule",
                 "update_alert_rule",
                 "delete_alert_rule",
@@ -97,8 +94,7 @@ async def test_without_disable_write_flag_enables_write_tools(grafana_env):
                 "create_graphite_annotation",
                 "update_annotation",
                 "patch_annotation",
-                "find_error_pattern_logs",
-                "find_slow_requests",
+                "delete_annotation",
             ]
             
             for tool in write_tools:
@@ -110,13 +106,10 @@ async def test_without_disable_write_flag_enables_write_tools(grafana_env):
                 "list_alert_rules",
                 "get_alert_rule_by_uid",
                 "list_contact_points",
-                "list_incidents",
-                "get_incident",
-                "get_sift_investigation",
+                "get_firing_alerts",
                 "get_annotations",
                 "get_annotation_tags",
             ]
             
             for tool in read_tools:
                 assert tool in tool_names, f"Read tool '{tool}' should be available without --disable-write flag"
-
