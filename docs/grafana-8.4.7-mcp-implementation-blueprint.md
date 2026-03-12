@@ -102,7 +102,7 @@ tools/
 
 说明：
 
-- `tools/v84/registry.go` 是唯一默认入口
+- `tools/registry.go` 是唯一默认入口
 - 旧 `tools/*.go` 可保留作迁移参考，但不再作为默认注册集合
 
 ---
@@ -170,7 +170,7 @@ tools/
 ## 阶段 A：依赖与骨架切换（1-2 天）
 
 - 固定 OpenAPI client 到 8.4.7
-- 建立 `internal/compat/v84` 与 `tools/v84/registry.go`
+- 建立 `internal/compat/v84` 与 `tools/registry.go`
 - 默认注册入口切换到 `AddV84Tools`
 
 交付标准：

@@ -11,7 +11,7 @@
 
 | 项目 | 内容 |
 |------|------|
-| **文件** | `tools/v84/dashboard.go` |
+| **文件** | `tools/dashboard.go` |
 | **严重等级** | 🔴 高 — 导致返回空 Title |
 | **根因** | 生成的 OpenAPI model `PostDashboardOKBody` 中 Go 字段名为 `Slug`，但 JSON tag 为 `json:"title"`。而 Grafana 8.4.7 实际 API 返回的 JSON key 是 `"slug"` 而非 `"title"`，导致反序列化时该字段为 nil。此外 `ID` 被定义为 `*string`，但实际 API 返回整数。 |
 
@@ -65,7 +65,7 @@ if t, ok := args.Dashboard["title"].(string); ok && t != "" {
 
 | 项目 | 内容 |
 |------|------|
-| **文件** | `tools/v84/folder.go` |
+| **文件** | `tools/folder.go` |
 | **严重等级** | 🟡 中 — 参数被忽略，用户设置无效 |
 | **根因** | `CreateFolderRequest` 声明了 `ParentUID` 字段，但 Grafana 8.4.7 的 `CreateFolderCommand` model 仅支持 `Title` + `UID`。嵌套文件夹是 Grafana 9.x 引入的功能。 |
 
@@ -109,7 +109,7 @@ type CreateFolderRequest struct {
 
 | 项目 | 内容 |
 |------|------|
-| **文件** | `tools/v84/folder.go` |
+| **文件** | `tools/folder.go` |
 | **严重等级** | 🟡 中 — 参数被忽略，用户设置无效 |
 | **根因** | `ListFoldersRequest` 声明了 `Permission` 字段，但 Grafana 8.4.7 的 `GetFoldersParams` 仅支持 `Limit` + `Page`。Permission 过滤是后续版本引入的。 |
 
@@ -142,7 +142,7 @@ type ListFoldersRequest struct {
 
 ### 2.1 新增合约类型文件
 
-**新文件：`tools/v84/types.go`**
+**新文件：`tools/types.go`**
 
 定义了以下合约类型：
 
@@ -199,7 +199,7 @@ func dataSourceToModel(ds *models.DataSource) DatasourceModel {
 
 ### 3.1 统一 `APIError` 错误模型与错误映射器
 
-**文件：`tools/v84/types.go` + `tools/v84/common.go`**
+**文件：`tools/types.go` + `tools/common.go`**
 
 新增内容：
 
@@ -240,7 +240,7 @@ func wrapAPIError(statusCode int, respBody []byte, fallbackMsg string) *APIError
 
 ## 四、单元测试补充
 
-**文件：`tools/v84/v84_unit_test.go`**
+**文件：`tools/v84_unit_test.go`**
 
 | 分类 | 新增测试函数 | 测试用例数 |
 |------|-------------|-----------|
@@ -279,18 +279,18 @@ func wrapAPIError(statusCode int, respBody []byte, fallbackMsg string) *APIError
 
 | 文件 | 操作 | 说明 |
 |------|------|------|
-| `tools/v84/types.go` | **新增** | 合约类型 + APIError 模型 |
-| `tools/v84/common.go` | 修改 | 新增 `newAPIError` / `wrapAPIError` 错误映射函数 |
-| `tools/v84/dashboard.go` | 修改 | Bug 1 修复：raw HTTP + 正确 JSON mapping |
-| `tools/v84/folder.go` | 修改 | Bug 2+3 修复：移除不可用参数 + 合约返回类型 |
-| `tools/v84/health_user_org.go` | 修改 | `any` → 类型化响应 |
-| `tools/v84/search.go` | 修改 | `[]*models.Hit` → `[]SearchHit` |
-| `tools/v84/datasource.go` | 修改 | OpenAPI model → `DatasourceModel` |
-| `tools/v84/datasource_resolver.go` | 修改 | `*models.DataSource` → `DatasourceModel` |
-| `tools/v84/annotations.go` | 修改 | jsonschema 补全 + `[]AnnotationItem` |
-| `tools/v84/legacy_alerting.go` | 修改 | `[]map[string]any` → 类型化 struct |
-| `tools/v84/org_admin.go` | 修改 | OpenAPI model → 合约类型 |
-| `tools/v84/v84_unit_test.go` | 修改 | 新增 15 个测试函数、27 个测试用例 |
+| `tools/types.go` | **新增** | 合约类型 + APIError 模型 |
+| `tools/common.go` | 修改 | 新增 `newAPIError` / `wrapAPIError` 错误映射函数 |
+| `tools/dashboard.go` | 修改 | Bug 1 修复：raw HTTP + 正确 JSON mapping |
+| `tools/folder.go` | 修改 | Bug 2+3 修复：移除不可用参数 + 合约返回类型 |
+| `tools/health_user_org.go` | 修改 | `any` → 类型化响应 |
+| `tools/search.go` | 修改 | `[]*models.Hit` → `[]SearchHit` |
+| `tools/datasource.go` | 修改 | OpenAPI model → `DatasourceModel` |
+| `tools/datasource_resolver.go` | 修改 | `*models.DataSource` → `DatasourceModel` |
+| `tools/annotations.go` | 修改 | jsonschema 补全 + `[]AnnotationItem` |
+| `tools/legacy_alerting.go` | 修改 | `[]map[string]any` → 类型化 struct |
+| `tools/org_admin.go` | 修改 | OpenAPI model → 合约类型 |
+| `tools/v84_unit_test.go` | 修改 | 新增 15 个测试函数、27 个测试用例 |
 
 ---
 
@@ -300,7 +300,7 @@ func wrapAPIError(statusCode int, respBody []byte, fallbackMsg string) *APIError
 $ GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn go build ./...
 # 编译通过，无错误
 
-$ GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn go test -tags unit ./tools/v84/ -v
+$ GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn go test -tags unit ./tools/ -v
 # 30 个测试全部通过 (PASS)
-# ok  github.com/grafana/mcp-grafana/tools/v84  1.148s
+# ok  github.com/grafana/mcp-grafana/tools  1.148s
 ```

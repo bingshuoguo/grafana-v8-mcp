@@ -1,49 +1,56 @@
 # Tests
 
-This directory contains an e2e test suite for the Grafana MCP server.
+This directory contains Python E2E tests for the current Grafana 8.4.7 (`v84`) MCP server profile.
 
-The test suite evaluates the LLM's ability to use Grafana MCP tools effectively:
+The suite exercises the tools that are still exposed by the server today:
 
-- **Loki tests**: Evaluates how well the LLM can use Grafana tools to:
-  - Navigate and use available tools
-  - Make appropriate tool calls
-  - Process and present the results in a meaningful way
-  - Evaluating the LLM responses using `deepeval` (GEval), using custom LLM-as-a-Judge approach.
+- health and org/admin reads
+- dashboards and navigation
+- Loki and ClickHouse queries
+- rendering
+- write-tool gating via `--disable-write`
 
-The tests are run against two LLM models:
-- GPT-4
-- Claude 3.5 Sonnet
-
-Tests are using [`uv`] to manage dependencies. Install uv following the instructions for your platform.
+Tests use [`uv`] for dependency management and `deepeval` for the LLM-driven scenarios.
 
 ## Prerequisites
-- Docker installed and running on your system
-- Docker containers for the test environment must be started before running tests
+
+- Docker installed and running
+- local Grafana test services started
+- API keys for the LLM providers used by the test suite
 
 ## Setup
-1. Create a virtual environment and install the dependencies:
+
+1. Install dependencies:
    ```bash
    uv sync --all-groups
    ```
 
-2. Create a `.env` file with your API keys:
+2. Create a `.env` file with LLM credentials:
    ```env
    OPENAI_API_KEY=sk-...
    ANTHROPIC_API_KEY=sk-ant-...
    ```
 
-3. Start the required Docker containers
-
-4. Start the MCP server in SSE mode; from the root of the project:
+3. Start the local test stack:
    ```bash
-   go run ./cmd/mcp-grafana -t sse --enabled-tools admin,search,dashboard,loki,navigation,rendering,proxied
+   make run-test-services
    ```
 
-   **Note:** This command enables only the tool categories that are tested in the e2e test suite: `admin` (for admin tests), `search` (for dashboard search), `dashboard`, `loki`, `navigation`, `rendering`, and `proxied` (for Tempo tests). Admin tools are disabled by default, so they must be explicitly included in `--enabled-tools` for admin tests to pass.
+4. Start the MCP server with optional v84 tools enabled:
+   ```bash
+   GRAFANA_USERNAME=admin \
+   GRAFANA_PASSWORD=admin \
+   go run ./cmd/mcp-grafana -t sse --enable-v84-optional-tools
+   ```
 
 5. Run the tests:
    ```bash
    uv run pytest
    ```
+
+## Notes
+
+- The old Tempo/proxied E2E tests were removed because proxied datasource tools are forcibly disabled in the current v84 runtime.
+- For `stdio` transport, `tests/conftest.py` starts the server with `--enable-v84-optional-tools` so rendering and unified-alerting tests can see those tools.
 
 [`uv`]: https://docs.astral.sh/uv/
