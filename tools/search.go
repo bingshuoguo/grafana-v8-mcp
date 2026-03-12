@@ -4,108 +4,119 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
-
 	"github.com/grafana/grafana-openapi-client-go/client/search"
-	"github.com/grafana/grafana-openapi-client-go/models"
+	"github.com/mark3labs/mcp-go/mcp"
+
 	mcpgrafana "github.com/grafana/mcp-grafana"
 )
 
-var dashboardTypeStr = "dash-db"
-var folderTypeStr = "dash-folder"
+const dashboardType = "dash-db"
 
-type SearchDashboardsParams struct {
-	Query string `json:"query" jsonschema:"description=The query to search for"`
-	Limit int    `json:"limit,omitempty" jsonschema:"default=50,description=Maximum number of results to return (max 100)"`
-	Page  int    `json:"page,omitempty" jsonschema:"default=1,description=Page number for pagination (1-indexed)"`
+type SearchDashboardsRequest struct {
+	Query        string   `json:"query,omitempty" jsonschema:"description=Search text for dashboard titles and metadata"`
+	Limit        *int64   `json:"limit,omitempty" jsonschema:"description=Max results per page\\, default 50"`
+	Page         *int64   `json:"page,omitempty" jsonschema:"description=Page number\\, 1-indexed"`
+	Tag          []string `json:"tag,omitempty" jsonschema:"description=Filter by tags"`
+	DashboardIDs []int64  `json:"dashboardIds,omitempty" jsonschema:"description=Filter by dashboard IDs"`
+	FolderIDs    []int64  `json:"folderIds,omitempty" jsonschema:"description=Filter by folder IDs"`
+	Starred      *bool    `json:"starred,omitempty" jsonschema:"description=Only starred dashboards when true"`
 }
 
-type SearchDashboardsResult struct {
-	Dashboards models.HitList `json:"dashboards"`
-	Total      int            `json:"total"`   // Total count (if available)
-	HasMore    bool           `json:"hasMore"` // Whether more results exist
+type SearchDashboardsResponse struct {
+	Items   []SearchHit `json:"items"`
+	Page    int64       `json:"page"`
+	Limit   int64       `json:"limit"`
+	HasMore bool        `json:"hasMore"`
 }
 
-func searchDashboards(ctx context.Context, args SearchDashboardsParams) (*SearchDashboardsResult, error) {
-	c := mcpgrafana.GrafanaClientFromContext(ctx)
-	params := search.NewSearchParamsWithContext(ctx)
-	if args.Query != "" {
-		params.SetQuery(&args.Query)
-		params.SetType(&dashboardTypeStr)
+func searchDashboards(ctx context.Context, args SearchDashboardsRequest) (*SearchDashboardsResponse, error) {
+	gc, err := getGrafanaClient(ctx)
+	if err != nil {
+		return nil, err
 	}
 
-	// Apply default limit if not specified
-	limit := int64(args.Limit)
+	params := search.NewSearchParamsWithContext(ctx)
+	params.SetType(func() *string { t := dashboardType; return &t }())
+
+	if args.Query != "" {
+		params.SetQuery(&args.Query)
+	}
+	if len(args.Tag) > 0 {
+		params.SetTag(args.Tag)
+	}
+	if len(args.FolderIDs) > 0 {
+		params.SetFolderIds(args.FolderIDs)
+	}
+	if len(args.DashboardIDs) > 0 {
+		params.SetDashboardIds(args.DashboardIDs)
+	}
+	if args.Starred != nil {
+		params.SetStarred(args.Starred)
+	}
+
+	limit := int64(50)
+	if args.Limit != nil {
+		limit = *args.Limit
+	}
 	if limit <= 0 {
 		limit = 50
 	}
-	// Cap at maximum
-	if limit > 100 {
-		limit = 100
+	if limit > 5000 {
+		limit = 5000
 	}
 	params.SetLimit(&limit)
 
-	// Apply page (1-indexed, default to 1)
-	page := int64(args.Page)
+	page := int64(1)
+	if args.Page != nil {
+		page = *args.Page
+	}
 	if page <= 0 {
 		page = 1
 	}
 	params.SetPage(&page)
 
-	searchResp, err := c.Search.Search(params)
+	resp, err := gc.Search.Search(params)
 	if err != nil {
-		return nil, fmt.Errorf("search dashboards for %+v: %w", c, err)
+		return nil, fmt.Errorf("search dashboards: %w", wrapOpenAPIError(err))
 	}
 
-	// Determine if there are more results
-	// If we got exactly limit results, there may be more
-	hasMore := len(searchResp.Payload) == int(limit)
+	hits := make([]SearchHit, 0)
+	if resp != nil && resp.Payload != nil {
+		for _, h := range resp.Payload {
+			if h == nil {
+				continue
+			}
+			hits = append(hits, SearchHit{
+				ID:          h.ID,
+				UID:         h.UID,
+				Title:       h.Title,
+				Type:        string(h.Type),
+				URL:         h.URL,
+				URI:         h.URI,
+				Slug:        h.Slug,
+				Tags:        h.Tags,
+				FolderID:    h.FolderID,
+				FolderUID:   h.FolderUID,
+				FolderTitle: h.FolderTitle,
+				FolderURL:   h.FolderURL,
+				IsStarred:   h.IsStarred,
+			})
+		}
+	}
 
-	return &SearchDashboardsResult{
-		Dashboards: searchResp.Payload,
-		Total:      len(searchResp.Payload), // Grafana doesn't return total count
-		HasMore:    hasMore,
+	return &SearchDashboardsResponse{
+		Items:   hits,
+		Page:    page,
+		Limit:   limit,
+		HasMore: int64(len(hits)) == limit,
 	}, nil
 }
 
-var SearchDashboards = mcpgrafana.MustTool(
+var SearchDashboardsTool = mcpgrafana.MustTool(
 	"search_dashboards",
-	"Search for Grafana dashboards by a query string. Returns a list of matching dashboards with details like title, UID, folder, tags, and URL.",
+	"Search Grafana dashboards with pagination and filters.",
 	searchDashboards,
 	mcp.WithTitleAnnotation("Search dashboards"),
-	mcp.WithIdempotentHintAnnotation(true),
 	mcp.WithReadOnlyHintAnnotation(true),
-)
-
-type SearchFoldersParams struct {
-	Query string `json:"query" jsonschema:"description=The query to search for"`
-}
-
-func searchFolders(ctx context.Context, args SearchFoldersParams) (models.HitList, error) {
-	c := mcpgrafana.GrafanaClientFromContext(ctx)
-	params := search.NewSearchParamsWithContext(ctx)
-	if args.Query != "" {
-		params.SetQuery(&args.Query)
-	}
-	params.SetType(&folderTypeStr)
-	search, err := c.Search.Search(params)
-	if err != nil {
-		return nil, fmt.Errorf("search folders for %+v: %w", c, err)
-	}
-	return search.Payload, nil
-}
-
-var SearchFolders = mcpgrafana.MustTool(
-	"search_folders",
-	"Search for Grafana folders by a query string. Returns matching folders with details like title, UID, and URL.",
-	searchFolders,
-	mcp.WithTitleAnnotation("Search folders"),
 	mcp.WithIdempotentHintAnnotation(true),
-	mcp.WithReadOnlyHintAnnotation(true),
 )
-
-func AddSearchTools(mcp *server.MCPServer) {
-	SearchDashboards.Register(mcp)
-	SearchFolders.Register(mcp)
-}
