@@ -10,15 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ─── capability ───────────────────────────────────────────────────────────────
-
-func TestCapabilityProbesExist(t *testing.T) {
-	// Just ensure the functions are callable (signature check).
-	// Real probing requires a live Grafana instance.
-	assert.NotNil(t, ProbeUnifiedAlerting)
-	assert.NotNil(t, ProbeImageRenderer)
-}
-
 // ─── alerting_unified ─────────────────────────────────────────────────────────
 
 func TestAlertingToolsRegistered(t *testing.T) {

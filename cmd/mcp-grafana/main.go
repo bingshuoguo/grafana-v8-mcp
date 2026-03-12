@@ -14,7 +14,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
 	mcpgrafana "github.com/grafana/mcp-grafana"
@@ -40,7 +39,7 @@ func maybeAddTools(s *server.MCPServer, tf func(*server.MCPServer), enabledTools
 type disabledTools struct {
 	enabledTools string
 
-	v84, proxied, write, v84Optional bool
+	v84, write, v84Optional bool
 }
 
 // Configuration for the Grafana client.
@@ -58,7 +57,6 @@ type grafanaConfig struct {
 func (dt *disabledTools) addFlags() {
 	flag.StringVar(&dt.enabledTools, "enabled-tools", "v84", "Comma separated list of enabled tool profiles. Supported profile: v84.")
 	flag.BoolVar(&dt.v84, "disable-v84", false, "Disable Grafana 8.4.7 tool profile.")
-	flag.BoolVar(&dt.proxied, "disable-proxied", true, "Disable proxied tools (tools from external MCP servers). This is forced for Grafana 8.4.7 profile.")
 	flag.BoolVar(&dt.write, "disable-write", false, "Disable write tools (create/update operations)")
 	flag.BoolVar(&dt.v84Optional, "enable-v84-optional-tools", false, "Enable optional Grafana 8.4.7 tools.")
 }
@@ -85,47 +83,8 @@ func (dt *disabledTools) addTools(s *server.MCPServer) {
 	)
 }
 
-func newServer(transport string, dt disabledTools, obs *observability.Observability) (*server.MCPServer, *mcpgrafana.ToolManager) {
-	sm := mcpgrafana.NewSessionManager()
-
-	// Declare variable for ToolManager that will be initialized after server creation
-	var stm *mcpgrafana.ToolManager
-
-	// Create hooks
-	hooks := &server.Hooks{
-		OnRegisterSession:   []server.OnRegisterSessionHookFunc{sm.CreateSession},
-		OnUnregisterSession: []server.OnUnregisterSessionHookFunc{sm.RemoveSession},
-	}
-
-	// Add proxied tools hooks if enabled and we're not running in stdio mode.
-	// (stdio mode is handled by InitializeAndRegisterServerTools; per-session tools
-	// are not supported).
-	if transport != "stdio" && !dt.proxied {
-		// OnBeforeListTools: Discover, connect, and register tools
-		hooks.OnBeforeListTools = []server.OnBeforeListToolsFunc{
-			func(ctx context.Context, id any, request *mcp.ListToolsRequest) {
-				if stm != nil {
-					if session := server.ClientSessionFromContext(ctx); session != nil {
-						stm.InitializeAndRegisterProxiedTools(ctx, session)
-					}
-				}
-			},
-		}
-
-		// OnBeforeCallTool: Fallback in case client calls tool without listing first
-		hooks.OnBeforeCallTool = []server.OnBeforeCallToolFunc{
-			func(ctx context.Context, id any, request *mcp.CallToolRequest) {
-				if stm != nil {
-					if session := server.ClientSessionFromContext(ctx); session != nil {
-						stm.InitializeAndRegisterProxiedTools(ctx, session)
-					}
-				}
-			},
-		}
-	}
-
-	// Merge observability hooks with existing hooks
-	hooks = observability.MergeHooks(hooks, obs.MCPHooks())
+func newServer(dt disabledTools, obs *observability.Observability) *server.MCPServer {
+	hooks := observability.MergeHooks(&server.Hooks{}, obs.MCPHooks())
 
 	s := server.NewMCPServer("mcp-grafana", mcpgrafana.Version(),
 		server.WithInstructions(`
@@ -145,11 +104,8 @@ Use only tools returned by list_tools. Some tools can be disabled via flags.
 		server.WithHooks(hooks),
 	)
 
-	// Initialize ToolManager now that server is created
-	stm = mcpgrafana.NewToolManager(sm, s, mcpgrafana.WithProxiedTools(!dt.proxied))
-
 	dt.addTools(s)
-	return s, stm
+	return s
 }
 
 type tlsConfig struct {
@@ -240,7 +196,7 @@ func run(transport, addr, basePath, endpointPath string, logLevel slog.Level, dt
 		}
 	}()
 
-	s, tm := newServer(transport, dt, o)
+	s := newServer(dt, o)
 
 	// Create a context that will be cancelled on shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -269,14 +225,6 @@ func run(transport, addr, basePath, endpointPath string, logLevel slog.Level, dt
 		srv := server.NewStdioServer(s)
 		cf := mcpgrafana.ComposedStdioContextFunc(gc)
 		srv.SetContextFunc(cf)
-
-		// For stdio (single-tenant), initialize proxied tools on the server directly
-		if !dt.proxied {
-			stdioCtx := cf(ctx)
-			if err := tm.InitializeAndRegisterServerTools(stdioCtx); err != nil {
-				slog.Error("failed to initialize proxied tools for stdio", "error", err)
-			}
-		}
 
 		slog.Info("Starting Grafana MCP server using stdio transport", "version", mcpgrafana.Version())
 
@@ -314,7 +262,7 @@ func run(transport, addr, basePath, endpointPath string, logLevel slog.Level, dt
 		httpSrv := &http.Server{Addr: addr}
 		opts := []server.StreamableHTTPOption{
 			server.WithHTTPContextFunc(mcpgrafana.ComposedHTTPContextFunc(gc)),
-			server.WithStateLess(dt.proxied), // Stateful when proxied tools enabled (requires sessions)
+			server.WithStateLess(true),
 			server.WithEndpointPath(endpointPath),
 			server.WithStreamableHTTPServer(httpSrv),
 		}
@@ -392,12 +340,6 @@ func main() {
 		obs.NetworkTransport = mcpconv.NetworkTransportPipe
 	case "sse", "streamable-http":
 		obs.NetworkTransport = mcpconv.NetworkTransportTCP
-	}
-
-	// Grafana 8.4.7 profile does not support proxied datasource MCP tools.
-	if !dt.proxied {
-		slog.Warn("proxied tools are not supported in v84 profile; forcing disable-proxied=true")
-		dt.proxied = true
 	}
 
 	if err := run(transport, *addr, *basePath, *endpointPath, parseLevel(*logLevel), dt, grafanaConfig, tls, obs); err != nil {

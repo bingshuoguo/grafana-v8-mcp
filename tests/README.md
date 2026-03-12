@@ -50,7 +50,7 @@ Tests use [`uv`] for dependency management and `deepeval` for the LLM-driven sce
 
 ## Notes
 
-- The old Tempo/proxied E2E tests were removed because proxied datasource tools are forcibly disabled in the current v84 runtime.
+- The old Tempo/proxied E2E tests were removed because the repository no longer ships proxied datasource MCP support in the current v84 runtime.
 - For `stdio` transport, `tests/conftest.py` starts the server with `--enable-v84-optional-tools` so rendering and unified-alerting tests can see those tools.
 
 [`uv`]: https://docs.astral.sh/uv/
