@@ -4,9 +4,8 @@
 `mcp-grafana` 是一个 MCP（Model Context Protocol）服务端，作为 LLM 客户端与 Grafana 生态之间的适配层。  
 它统一暴露工具（tools），将请求路由到：
 - Grafana HTTP API（dashboard/search/datasource/alerting 等）
-- 可选的 proxied MCP datasource 基础设施（代码仍保留，但当前 v84 运行时默认强制关闭）
 
-核心入口在 `cmd/mcp-grafana/main.go`，核心基础设施在根目录 `mcpgrafana.go`、`session.go`、`proxied_*.go`、`observability/`。
+核心入口在 `cmd/mcp-grafana/main.go`，核心基础设施在根目录 `mcpgrafana.go`、`tools.go`、`observability/`。
 
 ## 2. 运行模式
 
@@ -16,8 +15,6 @@
 | `sse` | `server.NewSSEServer` | `ComposedSSEContextFunc`（Header + Env fallback） | 长连接推送 |
 | `streamable-http` | `server.NewStreamableHTTPServer` | `ComposedHTTPContextFunc` | 多客户端/网关场景 |
 
-`streamable-http` 在 proxied tools 开启时使用有状态会话（`WithStateLess(false)`）。
-
 ## 3. 核心模块分层
 
 ```mermaid
@@ -25,13 +22,9 @@ graph TD
   A[CLI/main.go] --> B[MCP Server]
   A --> C[Observability Setup]
   B --> D[tools/* v84 Profile]
-  B --> E[Hooks: Session + Metrics]
-  E --> F[SessionManager]
-  E --> G[ToolManager / Proxied Infra]
-  G --> H[ProxiedClient]
+  B --> E[Hooks: Metrics]
   D --> I[Grafana HTTP Client from Context]
   I --> K[Grafana HTTP API]
-  H --> M[Datasource MCP Endpoint]
 ```
 
 ## 4. 启动与装配流程
@@ -39,9 +32,6 @@ graph TD
 2. 构造 `GrafanaConfig` 与 `observability.Config`。
 3. `observability.Setup` 初始化 tracing/metrics provider。
 4. `newServer` 创建：
-   - `SessionManager`（会话状态）
-   - 基础 hooks（session 注册/销毁）
-   - proxied hooks（`OnBeforeListTools` / `OnBeforeCallTool`）
    - 合并观测 hooks（`observability.MergeHooks`）
 5. 注册当前唯一默认工具集（`disabledTools.addTools` -> `tools.AddV84Tools`）。
 6. 根据 transport 启动 stdio/SSE/streamable HTTP 服务，并暴露 `/healthz`、可选 `/metrics`。
@@ -63,12 +53,7 @@ graph TD
 - `tools/` 目录按能力拆分（search、dashboard、datasource、prometheus、loki、clickhouse、alerting、annotations 等），但都属于同一个 v84 profile。
 - 写操作由 `--disable-write` 统一控制，`AddV84Tools` 内按 `enableWriteTools` 选择性注册写工具。
 
-## 7. Proxied Tools 子系统
-- 代码库仍保留 proxied datasource MCP 的发现、连接和转发基础设施。
-- 但在当前 v84 发行路径中，`cmd/mcp-grafana/main.go` 会强制关闭 proxied tools，因此它不是默认产品能力。
-- 如果未来重新启用，这部分仍通过 `discoverMCPDatasources`、`NewProxiedClient` 和 `ProxiedToolHandler` 完成发现与转发。
-
-## 8. 可观测性设计
+## 7. 可观测性设计
 `observability/` 提供：
 - Tracing：当设置 `OTEL_EXPORTER_OTLP_ENDPOINT` 时启用 OTLP gRPC exporter。
 - Metrics：`--metrics` 开启 Prometheus 指标，使用 MCP semconv 记录：
@@ -76,7 +61,7 @@ graph TD
   - `mcp_server_session_duration_seconds`
 - HTTP 层统一经 `WrapHandler` 做 OTel instrumentation。
 
-## 9. 关键调用时序（以 streamable-http 为例）
+## 8. 关键调用时序（以 streamable-http 为例）
 
 ```mermaid
 sequenceDiagram
@@ -95,7 +80,6 @@ sequenceDiagram
   S-->>C: CallToolResult
 ```
 
-## 10. 扩展建议
+## 9. 扩展建议
 - 新增 v84 tool：直接在 `tools/` 下新增能力文件，并在 `AddV84Tools` 中接入注册。
-- 若重新启用 proxied datasource：在 `mcpEnabledDatasources` 增加 type 与 endpointPath，并补充集成测试。
 - 新增 context 能力：以 `Compose*ContextFuncs` 方式插拔，避免侵入工具实现。
