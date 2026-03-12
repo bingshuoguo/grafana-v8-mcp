@@ -423,7 +423,7 @@ make build-image    # Build Docker image
 make test-unit
 
 # Or equivalently
-GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn go test -tags unit ./tools/v84/ -v
+GOLANG_PROTOBUF_REGISTRATION_CONFLICT=warn go test -tags unit ./tools/ -v
 
 # Integration tests (requires Docker services)
 make run-test-services   # Start Grafana + dependencies
@@ -444,7 +444,7 @@ make lint-jsonschema   # Custom jsonschema comma-escape linter
 
 ```
 cmd/mcp-grafana/          # Server entry point
-tools/v84/                # Grafana 8.4.7 tool implementations
+tools/                    # Grafana 8.4.7 tool implementations
   common.go               #   OpenAPI client factory, doAPIRequest, error helpers
   types.go                #   Contract types (SearchHit, DatasourceModel, AnnotationItem, etc.)
   datasource_resolver.go  #   ID-first datasource resolution logic

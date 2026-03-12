@@ -5,273 +5,233 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
-
-	mcpgrafana "github.com/grafana/mcp-grafana"
-
 	"github.com/grafana/grafana-openapi-client-go/client/annotations"
 	"github.com/grafana/grafana-openapi-client-go/models"
+	"github.com/mark3labs/mcp-go/mcp"
+
+	mcpgrafana "github.com/grafana/mcp-grafana"
 )
 
-// GetAnnotationsInput filters annotation search.
-type GetAnnotationsInput struct {
-	From         *int64   `jsonschema:"description=Epoch ms start time"`
-	To           *int64   `jsonschema:"description=Epoch ms end time"`
-	Limit        *int64   `jsonschema:"description=Max results default 100"`
-	AlertID      *int64   `jsonschema:"description=Deprecated. Use AlertUID"`
-	AlertUID     *string  `jsonschema:"description=Filter by alert UID"`
-	DashboardID  *int64   `jsonschema:"description=Deprecated. Use DashboardUID"`
-	DashboardUID *string  `jsonschema:"description=Filter by dashboard UID"`
-	PanelID      *int64   `jsonschema:"description=Filter by panel ID"`
-	UserID       *int64   `jsonschema:"description=Filter by creator user ID"`
-	Type         *string  `jsonschema:"description=annotation or alert"`
-	Tags         []string `jsonschema:"description=Multiple tags allowed tags=tag1&tags=tag2"`
-	MatchAny     *bool    `jsonschema:"description=true OR tag match false AND"`
+type GetAnnotationsRequest struct {
+	From         *int64   `json:"from,omitempty" jsonschema:"description=Epoch millisecond start time"`
+	To           *int64   `json:"to,omitempty" jsonschema:"description=Epoch millisecond end time"`
+	UserID       *int64   `json:"userId,omitempty" jsonschema:"description=Filter by creator user ID"`
+	AlertID      *int64   `json:"alertId,omitempty" jsonschema:"description=Filter by alert ID"`
+	AlertUID     *string  `json:"alertUid,omitempty" jsonschema:"description=Filter by alert UID"`
+	DashboardID  *int64   `json:"dashboardId,omitempty" jsonschema:"description=Filter by dashboard ID"`
+	DashboardUID *string  `json:"dashboardUid,omitempty" jsonschema:"description=Filter by dashboard UID"`
+	PanelID      *int64   `json:"panelId,omitempty" jsonschema:"description=Filter by panel ID"`
+	Limit        *int64   `json:"limit,omitempty" jsonschema:"description=Max number of annotations to return"`
+	Tags         []string `json:"tags,omitempty" jsonschema:"description=Filter by annotation tags"`
+	Type         string   `json:"type,omitempty" jsonschema:"description=Filter by type: alert or annotation"`
+	MatchAny     *bool    `json:"matchAny,omitempty" jsonschema:"description=Match any tag (OR) instead of all (AND)"`
 }
 
-// getAnnotations retrieves Grafana annotations using filters.
-func getAnnotations(ctx context.Context, args GetAnnotationsInput) (*annotations.GetAnnotationsOK, error) {
-	c := mcpgrafana.GrafanaClientFromContext(ctx)
+type GetAnnotationsResponse struct {
+	Items []AnnotationItem `json:"items"`
+}
 
-	req := annotations.GetAnnotationsParams{
+func getAnnotations(ctx context.Context, args GetAnnotationsRequest) (*GetAnnotationsResponse, error) {
+	gc, err := getGrafanaClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	params := &annotations.GetAnnotationsParams{
+		Context:      ctx,
 		From:         args.From,
 		To:           args.To,
-		Limit:        args.Limit,
+		UserID:       args.UserID,
 		AlertID:      args.AlertID,
 		AlertUID:     args.AlertUID,
 		DashboardID:  args.DashboardID,
 		DashboardUID: args.DashboardUID,
 		PanelID:      args.PanelID,
-		UserID:       args.UserID,
-		Type:         args.Type,
+		Limit:        args.Limit,
 		Tags:         args.Tags,
 		MatchAny:     args.MatchAny,
-		Context:      ctx,
+	}
+	if args.Type != "" {
+		params.Type = &args.Type
 	}
 
-	resp, err := c.Annotations.GetAnnotations(&req)
+	resp, err := gc.Annotations.GetAnnotations(params)
 	if err != nil {
-		return nil, fmt.Errorf("get annotations: %w", err)
+		return nil, fmt.Errorf("get annotations: %w", wrapOpenAPIError(err))
 	}
 
-	return resp, nil
+	items := make([]AnnotationItem, 0)
+	if resp != nil && resp.Payload != nil {
+		for _, a := range resp.Payload {
+			items = append(items, itemDTOToAnnotation(a))
+		}
+	}
+	return &GetAnnotationsResponse{Items: items}, nil
+}
+
+func itemDTOToAnnotation(a *models.Annotation) AnnotationItem {
+	if a == nil {
+		return AnnotationItem{}
+	}
+	return AnnotationItem{
+		ID:           a.ID,
+		AlertID:      a.AlertID,
+		AlertName:    a.AlertName,
+		DashboardID:  a.DashboardID,
+		DashboardUID: a.DashboardUID,
+		PanelID:      a.PanelID,
+		UserID:       a.UserID,
+		Login:        a.Login,
+		Email:        a.Email,
+		AvatarURL:    a.AvatarURL,
+		NewState:     a.NewState,
+		PrevState:    a.PrevState,
+		Text:         a.Text,
+		Tags:         a.Tags,
+		Time:         a.Time,
+		TimeEnd:      a.TimeEnd,
+		Created:      a.Created,
+		Updated:      a.Updated,
+	}
 }
 
 var GetAnnotationsTool = mcpgrafana.MustTool(
 	"get_annotations",
-	"Fetch Grafana annotations using filters such as dashboard UID, time range and tags.",
+	"List annotations with optional filters such as time range, dashboard, tags, and type.",
 	getAnnotations,
-	mcp.WithTitleAnnotation("Get Annotations"),
-	mcp.WithIdempotentHintAnnotation(true),
+	mcp.WithTitleAnnotation("Get annotations"),
 	mcp.WithReadOnlyHintAnnotation(true),
+	mcp.WithIdempotentHintAnnotation(true),
 )
 
-// CreateAnnotationInput creates a new annotation.
-type CreateAnnotationInput struct {
-	DashboardID  int64          `json:"dashboardId,omitempty"  jsonschema:"description=Deprecated. Use dashboardUID"`
-	DashboardUID string         `json:"dashboardUID,omitempty" jsonschema:"description=Preferred dashboard UID"`
-	PanelID      int64          `json:"panelId,omitempty"      jsonschema:"description=Panel ID"`
-	Time         int64          `json:"time,omitempty"         jsonschema:"description=Start time epoch ms"`
-	TimeEnd      int64          `json:"timeEnd,omitempty"      jsonschema:"description=End time epoch ms"`
-	Tags         []string       `json:"tags,omitempty"         jsonschema:"description=Optional list of tags"`
-	Text         string         `json:"text"                   jsonschema:"description=Annotation text required"`
-	Data         map[string]any `json:"data,omitempty"         jsonschema:"description=Optional JSON payload"`
+type CreateAnnotationRequest struct {
+	DashboardID  *int64         `json:"dashboardId,omitempty" jsonschema:"description=Dashboard numeric ID"`
+	DashboardUID string         `json:"dashboardUid,omitempty" jsonschema:"description=Dashboard UID"`
+	PanelID      *int64         `json:"panelId,omitempty" jsonschema:"description=Panel ID to attach annotation to"`
+	Time         *int64         `json:"time,omitempty" jsonschema:"description=Epoch millisecond start time"`
+	TimeEnd      *int64         `json:"timeEnd,omitempty" jsonschema:"description=Epoch millisecond end time (for region annotations)"`
+	Tags         []string       `json:"tags,omitempty" jsonschema:"description=Annotation tags"`
+	Text         string         `json:"text" jsonschema:"required,description=Annotation text"`
+	Data         map[string]any `json:"data,omitempty" jsonschema:"description=Arbitrary annotation data"`
 }
 
-// createAnnotation sends a POST request to create a Grafana annotation.
-func createAnnotation(ctx context.Context, args CreateAnnotationInput) (*annotations.PostAnnotationOK, error) {
-	c := mcpgrafana.GrafanaClientFromContext(ctx)
+type CreateAnnotationResponse struct {
+	Message string `json:"message,omitempty"`
+	ID      int64  `json:"id,omitempty"`
+}
 
-	req := models.PostAnnotationsCmd{
-		DashboardID:  args.DashboardID,
-		DashboardUID: args.DashboardUID,
-		PanelID:      args.PanelID,
-		Time:         args.Time,
-		TimeEnd:      args.TimeEnd,
-		Tags:         args.Tags,
-		Text:         &args.Text,
-		Data:         args.Data,
+func createAnnotation(ctx context.Context, args CreateAnnotationRequest) (*CreateAnnotationResponse, error) {
+	if args.Text == "" {
+		return nil, fmt.Errorf("text is required")
 	}
 
-	resp, err := c.Annotations.PostAnnotation(&req)
+	gc, err := getGrafanaClient(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("create annotation: %w", err)
+		return nil, err
 	}
 
-	return resp, nil
+	cmd := &models.PostAnnotationsCmd{
+		Tags: args.Tags,
+		Text: &args.Text,
+		Data: args.Data,
+	}
+	if args.DashboardID != nil {
+		cmd.DashboardID = *args.DashboardID
+	}
+	if args.DashboardUID != "" {
+		cmd.DashboardUID = args.DashboardUID
+	}
+	if args.PanelID != nil {
+		cmd.PanelID = *args.PanelID
+	}
+	if args.Time != nil {
+		cmd.Time = *args.Time
+	}
+	if args.TimeEnd != nil {
+		cmd.TimeEnd = *args.TimeEnd
+	}
+
+	resp, err := gc.Annotations.PostAnnotation(cmd)
+	if err != nil {
+		return nil, fmt.Errorf("create annotation: %w", wrapOpenAPIError(err))
+	}
+	if resp == nil || resp.Payload == nil {
+		return &CreateAnnotationResponse{}, nil
+	}
+
+	result := &CreateAnnotationResponse{}
+	if resp.Payload.Message != nil {
+		result.Message = *resp.Payload.Message
+	}
+	if resp.Payload.ID != nil {
+		result.ID = *resp.Payload.ID
+	}
+	return result, nil
 }
 
 var CreateAnnotationTool = mcpgrafana.MustTool(
 	"create_annotation",
-	"Create a new annotation on a dashboard or panel.",
+	"Create a new annotation.",
 	createAnnotation,
-	mcp.WithTitleAnnotation("Create Annotation"),
-	mcp.WithIdempotentHintAnnotation(false),
-)
-
-// CreateGraphiteAnnotationInput represents the payload format for creating a Graphite-style annotation.
-type CreateGraphiteAnnotationInput struct {
-	What string   `json:"what"  jsonschema:"description=Annotation text"`
-	When int64    `json:"when"  jsonschema:"description=Epoch ms timestamp"`
-	Tags []string `json:"tags,omitempty" jsonschema:"description=Optional list of tags"`
-	Data string   `json:"data,omitempty" jsonschema:"description=Optional payload"`
-}
-
-// createAnnotationGraphiteFormat creates an annotation using the Graphite annotation format.
-func createAnnotationGraphiteFormat(ctx context.Context, args CreateGraphiteAnnotationInput) (*annotations.PostGraphiteAnnotationOK, error) {
-	c := mcpgrafana.GrafanaClientFromContext(ctx)
-
-	req := &models.PostGraphiteAnnotationsCmd{
-		What: args.What,
-		When: args.When,
-		Tags: args.Tags,
-		Data: args.Data,
-	}
-
-	resp, err := c.Annotations.PostGraphiteAnnotation(req)
-	if err != nil {
-		return nil, fmt.Errorf("create graphite annotation: %w", err)
-	}
-
-	return resp, nil
-}
-
-var CreateGraphiteAnnotationTool = mcpgrafana.MustTool(
-	"create_graphite_annotation",
-	"Create an annotation using Graphite annotation format.",
-	createAnnotationGraphiteFormat,
-	mcp.WithTitleAnnotation("Create Graphite Annotation"),
-	mcp.WithIdempotentHintAnnotation(false),
-)
-
-// UpdateAnnotationInput represents the payload used to update an existing annotation by ID.
-type UpdateAnnotationInput struct {
-	ID      int64          `json:"id"       jsonschema:"description=Annotation ID to update"`
-	Time    int64          `json:"time,omitempty"    jsonschema:"description=Start time epoch ms"`
-	TimeEnd int64          `json:"timeEnd,omitempty" jsonschema:"description=End time epoch ms"`
-	Text    string         `json:"text,omitempty"    jsonschema:"description=Annotation text"`
-	Tags    []string       `json:"tags,omitempty"    jsonschema:"description=Tags to replace existing tags"`
-	Data    map[string]any `json:"data,omitempty" jsonschema:"description=Optional JSON payload"`
-}
-
-// updateAnnotation updates an annotation using its ID.
-func updateAnnotation(ctx context.Context, args UpdateAnnotationInput) (*annotations.UpdateAnnotationOK, error) {
-	c := mcpgrafana.GrafanaClientFromContext(ctx)
-	annotationID := strconv.FormatInt(args.ID, 10)
-	req := &models.UpdateAnnotationsCmd{
-		Time:    args.Time,
-		TimeEnd: args.TimeEnd,
-		Text:    args.Text,
-		Tags:    args.Tags,
-		Data:    args.Data,
-	}
-
-	resp, err := c.Annotations.UpdateAnnotation(annotationID, req)
-	if err != nil {
-		return nil, fmt.Errorf("update annotation: %w", err)
-	}
-
-	return resp, nil
-}
-
-var UpdateAnnotationTool = mcpgrafana.MustTool(
-	"update_annotation",
-	"Updates all properties of an annotation that matches the specified ID. Sends a full update (PUT). For partial updates, use patch_annotation instead.",
-	updateAnnotation,
-	mcp.WithTitleAnnotation("Update Annotation"),
+	mcp.WithTitleAnnotation("Create annotation"),
 	mcp.WithDestructiveHintAnnotation(true),
-	mcp.WithIdempotentHintAnnotation(false),
 )
 
-// PatchAnnotationInput updates only the provided fields.
-type PatchAnnotationInput struct {
-	ID      int64          `json:"id" jsonschema:"description=Annotation ID"`
-	Text    *string        `json:"text,omitempty"     jsonschema:"description=Optional new text"`
-	Tags    []string       `json:"tags,omitempty"     jsonschema:"description=Optional replace tags"`
-	Time    *int64         `json:"time,omitempty"     jsonschema:"description=Optional new start epoch ms"`
-	TimeEnd *int64         `json:"timeEnd,omitempty"  jsonschema:"description=Optional new end epoch ms"`
-	Data    map[string]any `json:"data,omitempty"     jsonschema:"description=Optional metadata"`
+type PatchAnnotationRequest struct {
+	ID      int64          `json:"id" jsonschema:"required,description=Annotation ID"`
+	Time    *int64         `json:"time,omitempty" jsonschema:"description=Epoch millisecond start time"`
+	TimeEnd *int64         `json:"timeEnd,omitempty" jsonschema:"description=Epoch millisecond end time"`
+	Tags    []string       `json:"tags,omitempty" jsonschema:"description=Updated annotation tags"`
+	Text    *string        `json:"text,omitempty" jsonschema:"description=Updated annotation text"`
+	Data    map[string]any `json:"data,omitempty" jsonschema:"description=Updated arbitrary annotation data"`
 }
 
-// patchAnnotation patches only the provided annotation fields.
-func patchAnnotation(ctx context.Context, args PatchAnnotationInput) (*annotations.PatchAnnotationOK, error) {
-	c := mcpgrafana.GrafanaClientFromContext(ctx)
-	id := strconv.FormatInt(args.ID, 10)
+type PatchAnnotationResponse struct {
+	Message string `json:"message,omitempty"`
+}
 
-	body := &models.PatchAnnotationsCmd{}
-
-	if args.Text != nil {
-		body.Text = *args.Text
+func patchAnnotation(ctx context.Context, args PatchAnnotationRequest) (*PatchAnnotationResponse, error) {
+	if args.ID <= 0 {
+		return nil, fmt.Errorf("id is required")
 	}
+
+	gc, err := getGrafanaClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	cmd := &models.PatchAnnotationsCmd{ID: args.ID}
 	if args.Time != nil {
-		body.Time = *args.Time
+		cmd.Time = *args.Time
 	}
 	if args.TimeEnd != nil {
-		body.TimeEnd = *args.TimeEnd
+		cmd.TimeEnd = *args.TimeEnd
 	}
 	if args.Tags != nil {
-		body.Tags = args.Tags
+		cmd.Tags = args.Tags
+	}
+	if args.Text != nil {
+		cmd.Text = *args.Text
 	}
 	if args.Data != nil {
-		body.Data = args.Data
+		cmd.Data = args.Data
 	}
 
-	resp, err := c.Annotations.PatchAnnotation(id, body)
+	resp, err := gc.Annotations.PatchAnnotation(strconv.FormatInt(args.ID, 10), cmd)
 	if err != nil {
-		return nil, fmt.Errorf("patch annotation: %w", err)
+		return nil, fmt.Errorf("patch annotation: %w", wrapOpenAPIError(err))
 	}
-	return resp, nil
+	if resp == nil || resp.Payload == nil {
+		return &PatchAnnotationResponse{}, nil
+	}
+
+	return &PatchAnnotationResponse{Message: resp.Payload.Message}, nil
 }
 
 var PatchAnnotationTool = mcpgrafana.MustTool(
 	"patch_annotation",
-	"Updates only the provided properties of an annotation. Fields omitted are not modified. Use update_annotation for full replacement.",
+	"Patch selected fields on an annotation.",
 	patchAnnotation,
-	mcp.WithTitleAnnotation("Patch Annotation"),
+	mcp.WithTitleAnnotation("Patch annotation"),
 	mcp.WithDestructiveHintAnnotation(true),
-	mcp.WithIdempotentHintAnnotation(false),
 )
-
-// GetAnnotationTagsInput defines filters for retrieving annotation tags.
-type GetAnnotationTagsInput struct {
-	Tag   *string `json:"tag,omitempty"   jsonschema:"description=Optional filter by tag name"`
-	Limit *string `json:"limit,omitempty" jsonschema:"description=Max results\\, default 100"`
-}
-
-func getAnnotationTags(ctx context.Context, args GetAnnotationTagsInput) (*annotations.GetAnnotationTagsOK, error) {
-	c := mcpgrafana.GrafanaClientFromContext(ctx)
-
-	req := annotations.GetAnnotationTagsParams{
-		Tag:     args.Tag,
-		Limit:   args.Limit,
-		Context: ctx,
-	}
-
-	resp, err := c.Annotations.GetAnnotationTags(&req)
-	if err != nil {
-		return nil, fmt.Errorf("get annotation tags: %w", err)
-	}
-
-	return resp, nil
-}
-
-var GetAnnotationTagsTool = mcpgrafana.MustTool(
-	"get_annotation_tags",
-	"Returns annotation tags with optional filtering by tag name. Only the provided filters are applied.",
-	getAnnotationTags,
-	mcp.WithTitleAnnotation("Get Annotation Tags"),
-	mcp.WithIdempotentHintAnnotation(true),
-	mcp.WithReadOnlyHintAnnotation(true),
-)
-
-func AddAnnotationTools(mcp *server.MCPServer, enableWriteTools bool) {
-	GetAnnotationsTool.Register(mcp)
-	if enableWriteTools {
-		CreateAnnotationTool.Register(mcp)
-		CreateGraphiteAnnotationTool.Register(mcp)
-		UpdateAnnotationTool.Register(mcp)
-		PatchAnnotationTool.Register(mcp)
-	}
-	GetAnnotationTagsTool.Register(mcp)
-}

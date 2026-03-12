@@ -114,10 +114,8 @@ grafanaConfig := mcpgrafana.GrafanaConfig{
 // Create MCP server
 s := server.NewMCPServer("mcp-grafana", "1.0.0")
 
-// Add tools
-tools.AddSearchTools(s)
-tools.AddDatasourceTools(s)
-// ... add other tools as needed
+// Add Grafana 8.4.7 tools
+tools.AddV84Tools(s, false, false)
 
 // Create stdio server with TLS support
 srv := server.NewStdioServer(s)
@@ -154,10 +152,8 @@ func runServerWithTLS() {
 	// Create MCP server
 	s := server.NewMCPServer("mcp-grafana-tls-example", "1.0.0")
 
-	// Add some basic tools
-	tools.AddSearchTools(s)
-	tools.AddDatasourceTools(s)
-	tools.AddDashboardTools(s, false) // Read-only mode (no write tools)
+	// Add Grafana 8.4.7 tools in read-only mode
+	tools.AddV84Tools(s, false, false)
 
 	// Create stdio server with TLS-enabled context function
 	srv := server.NewStdioServer(s)

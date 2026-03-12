@@ -19,7 +19,7 @@ import (
 
 	mcpgrafana "github.com/grafana/mcp-grafana"
 	"github.com/grafana/mcp-grafana/observability"
-	v84tools "github.com/grafana/mcp-grafana/tools/v84"
+	grafanatools "github.com/grafana/mcp-grafana/tools"
 	"go.opentelemetry.io/otel/semconv/v1.39.0/mcpconv"
 )
 
@@ -78,7 +78,7 @@ func (dt *disabledTools) addTools(s *server.MCPServer) {
 	enableWriteTools := !dt.write
 	maybeAddTools(
 		s,
-		func(mcp *server.MCPServer) { v84tools.AddV84Tools(mcp, enableWriteTools, dt.v84Optional) },
+		func(mcp *server.MCPServer) { grafanatools.AddV84Tools(mcp, enableWriteTools, dt.v84Optional) },
 		enabledTools,
 		dt.v84,
 		"v84",
