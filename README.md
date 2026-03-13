@@ -1,8 +1,12 @@
-# Grafana MCP Server (Grafana 8.4.7 Profile)
+# Grafana MCP Server for Grafana v8 (8.4.7 Profile)
 
-A [Model Context Protocol][mcp] (MCP) server for **Grafana 8.4.7**, forked from [grafana/mcp-grafana](https://github.com/grafana/mcp-grafana).
+A [Model Context Protocol][mcp] (MCP) server for **Grafana v8**, forked from [grafana/mcp-grafana](https://github.com/grafana/mcp-grafana).
 
 This variant provides a dedicated tool profile (`v84`) that targets the Grafana 8.4.7 REST API, using **ID-first datasource resolution** and **raw HTTP fallbacks** where the upstream OpenAPI client models do not match the 8.4.7 API behaviour.
+
+> Compatibility note
+>
+> This repository is primarily intended for **Grafana v8 deployments** and is validated against **Grafana 8.4.7**. Other v8 releases with the same API surface may work, but Grafana v9+ is not the primary target of this fork.
 
 ## Quick Start
 
@@ -38,7 +42,7 @@ If your client cannot find `mcp-grafana` in `PATH`, use the absolute path to the
 
 ## Requirements
 
-- **Grafana 8.4.7** (or any 8.x release with the same API surface)
+- **Grafana v8**, with **8.4.7** as the validated target profile
 - Go 1.24+ (only needed for `go install` or building from source)
 
 ## Features
@@ -173,7 +177,7 @@ When `--enable-tools` is set, it acts as an allowlist and overrides the default 
 
 ### Prerequisites
 
-- **Grafana 8.4.7** instance, accessible via HTTP/HTTPS
+- A **Grafana v8** instance, ideally **8.4.7**, accessible via HTTP/HTTPS
 - A Grafana **Service Account Token** or **username/password** for authentication
 - **Go 1.24+** only if you install via `go install` or build from source
 
@@ -183,7 +187,7 @@ You need one of the following authentication methods:
 
 **Option A: Service Account Token (recommended)**
 
-1. Log in to your Grafana 8.4.7 instance.
+1. Log in to your Grafana v8 instance.
 2. Go to **Configuration > Service Accounts** (or **Administration > Service Accounts** depending on your Grafana version).
 3. Click **Add service account**, give it a name (e.g., `mcp-server`), and assign the **Editor** role.
 4. Click **Add token**, copy the generated token and save it -- you will use it as `GRAFANA_SERVICE_ACCOUNT_TOKEN`.
@@ -216,8 +220,8 @@ Make sure `$HOME/go/bin` is in your `PATH`.
 
 ```bash
 # Clone the repository
-git clone <repo-url> mcp-grafana-8.4.7
-cd mcp-grafana-8.4.7
+git clone <repo-url> grafana-v8-mcp
+cd grafana-v8-mcp
 
 # Build the binary (output: dist/mcp-grafana)
 make build
@@ -287,7 +291,7 @@ Create or edit the file `~/.cursor/mcp.json`:
 If you built from source, the path is typically:
 
 ```json
-"command": "/Users/<you>/path/to/mcp-grafana-8.4.7/dist/mcp-grafana"
+"command": "/Users/<you>/path/to/grafana-v8-mcp/dist/mcp-grafana"
 ```
 
 Or if you used `go install`:
@@ -537,7 +541,7 @@ make lint-jsonschema   # Custom jsonschema comma-escape linter
 
 ```
 cmd/mcp-grafana/          # Server entry point
-tools/                    # Grafana 8.4.7 tool implementations
+tools/                    # Grafana v8 / v84 tool implementations
   common.go               #   OpenAPI client factory, doAPIRequest, error helpers
   types.go                #   Contract types (SearchHit, DatasourceModel, AnnotationItem, etc.)
   datasource_resolver.go  #   ID-first datasource resolution logic
@@ -553,9 +557,9 @@ tools/                    # Grafana 8.4.7 tool implementations
   org_admin.go            #   list_org_users, list_teams
   v84_unit_test.go        #   Unit tests (43 tests)
 docs/
-  grafana-8.4.7-mcp-tool-spec.md           # Tool contract specification (JSON)
-  grafana-8.4.7-mcp-go-struct-mapping.md   # Go struct definitions
-  grafana-8.4.7-mcp-implementation-blueprint.md  # Architecture blueprint
+  clients/                # Per-client setup guides (Codex, Cursor, Claude, Zed, etc.)
+  internal/               # Internal rollout / Confluence-friendly docs
+  docs.agent/             # Documentation agent rules and context helpers
 ```
 
 ## License
