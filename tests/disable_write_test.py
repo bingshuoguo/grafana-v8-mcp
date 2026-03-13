@@ -21,7 +21,7 @@ async def test_disable_write_flag_disables_write_tools(grafana_env):
     """Test that --disable-write flag disables write tools."""
     params = StdioServerParameters(
         command=os.environ.get("MCP_GRAFANA_PATH", "../dist/mcp-grafana"),
-        args=["--disable-write", "--enable-v84-optional-tools"],
+        args=["--disable-write", "--enable-optional-tools"],
         env=grafana_env,
     )
     async with stdio_client(params) as (read, write):
@@ -70,7 +70,7 @@ async def test_without_disable_write_flag_enables_write_tools(grafana_env):
     """Test that without --disable-write flag, write tools are enabled."""
     params = StdioServerParameters(
         command=os.environ.get("MCP_GRAFANA_PATH", "../dist/mcp-grafana"),
-        args=["--enable-v84-optional-tools"],
+        args=["--enable-optional-tools"],
         env=grafana_env,
     )
     async with stdio_client(params) as (read, write):

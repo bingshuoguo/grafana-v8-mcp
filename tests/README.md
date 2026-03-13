@@ -40,7 +40,7 @@ Tests use [`uv`] for dependency management and `deepeval` for the LLM-driven sce
    ```bash
    GRAFANA_USERNAME=admin \
    GRAFANA_PASSWORD=admin \
-   go run ./cmd/mcp-grafana -t sse --enable-v84-optional-tools
+   go run ./cmd/mcp-grafana -t sse --enable-optional-tools
    ```
 
 5. Run the tests:
@@ -51,6 +51,6 @@ Tests use [`uv`] for dependency management and `deepeval` for the LLM-driven sce
 ## Notes
 
 - The old Tempo/proxied E2E tests were removed because the repository no longer ships proxied datasource MCP support in the current v84 runtime.
-- For `stdio` transport, `tests/conftest.py` starts the server with `--enable-v84-optional-tools` so rendering and unified-alerting tests can see those tools.
+- For `stdio` transport, `tests/conftest.py` starts the server with `--enable-optional-tools` so rendering and unified-alerting tests can see those tools.
 
 [`uv`]: https://docs.astral.sh/uv/

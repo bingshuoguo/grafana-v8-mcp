@@ -132,10 +132,8 @@ _\* Write tools. Disabled when `--disable-write` is set._
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--enabled-tools` | `v84` | Comma-separated list of enabled tool profiles |
-| `--disable-v84` | `false` | Disable the Grafana 8.4.7 tool profile |
 | `--disable-write` | `false` | Disable write tools (upsert_dashboard, create/update folder, create/patch annotation) |
-| `--enable-v84-optional-tools` | `false` | Enable optional phase-2 tools |
+| `--enable-optional-tools` | `false` | Enable optional tools (unified alerting, rendering) |
 
 ### Debug and Logging
 
