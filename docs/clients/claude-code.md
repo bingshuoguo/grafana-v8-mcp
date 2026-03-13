@@ -147,3 +147,23 @@ claude mcp add-json "grafana" '{
   }
 }'
 ```
+
+## Tool-level filtering
+
+```bash
+claude mcp add-json "grafana" '{
+  "command": "mcp-grafana",
+  "args": [
+    "--enable-tools=get_health,create_folder,get_panel_image",
+    "--disable-tools=create_folder"
+  ],
+  "env": {
+    "GRAFANA_URL": "http://localhost:3000",
+    "GRAFANA_SERVICE_ACCOUNT_TOKEN": "<your-token>"
+  }
+}'
+```
+
+Use exact public tool names only. Both flags also support repeated usage such as `--enable-tools get_health --enable-tools search_dashboards`.
+
+**Allowlist overrides disable-write:** When you set `--enable-tools`, only those tools are registered, so you can expose specific write tools even with `--disable-write`, e.g. `"--disable-write"`, `"--enable-tools=get_health,search_dashboards,upsert_dashboard"` in `args`.
