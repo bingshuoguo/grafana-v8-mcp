@@ -104,7 +104,7 @@ async def mcp_client(mcp_transport, mcp_url, grafana_env, grafana_headers):
                 "--debug",
                 "--log-level",
                 "debug",
-                "--enable-v84-optional-tools",
+                "--enable-optional-tools",
             ],
             env=grafana_env,
         )

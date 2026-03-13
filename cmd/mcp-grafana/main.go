@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"slices"
-	"strings"
 	"syscall"
 	"time"
 
@@ -22,24 +20,10 @@ import (
 	"go.opentelemetry.io/otel/semconv/v1.39.0/mcpconv"
 )
 
-func maybeAddTools(s *server.MCPServer, tf func(*server.MCPServer), enabledTools []string, disable bool, category string) {
-	if !slices.Contains(enabledTools, category) {
-		slog.Debug("Not enabling tools", "category", category)
-		return
-	}
-	if disable {
-		slog.Info("Disabling tools", "category", category)
-		return
-	}
-	slog.Debug("Enabling tools", "category", category)
-	tf(s)
-}
-
-// disabledTools indicates whether each category of tools should be disabled.
-type disabledTools struct {
-	enabledTools string
-
-	v84, write, v84Optional bool
+// toolConfig controls which tool categories are registered.
+type toolConfig struct {
+	disableWrite    bool
+	optionalTools   bool
 }
 
 // Configuration for the Grafana client.
@@ -54,11 +38,9 @@ type grafanaConfig struct {
 	tlsSkipVerify bool
 }
 
-func (dt *disabledTools) addFlags() {
-	flag.StringVar(&dt.enabledTools, "enabled-tools", "v84", "Comma separated list of enabled tool profiles. Supported profile: v84.")
-	flag.BoolVar(&dt.v84, "disable-v84", false, "Disable Grafana 8.4.7 tool profile.")
-	flag.BoolVar(&dt.write, "disable-write", false, "Disable write tools (create/update operations)")
-	flag.BoolVar(&dt.v84Optional, "enable-v84-optional-tools", false, "Enable optional Grafana 8.4.7 tools.")
+func (tc *toolConfig) addFlags() {
+	flag.BoolVar(&tc.disableWrite, "disable-write", false, "Disable write tools (create/update operations)")
+	flag.BoolVar(&tc.optionalTools, "enable-optional-tools", false, "Enable optional tools (unified alerting, rendering)")
 }
 
 func (gc *grafanaConfig) addFlags() {
@@ -71,19 +53,11 @@ func (gc *grafanaConfig) addFlags() {
 	flag.BoolVar(&gc.tlsSkipVerify, "tls-skip-verify", false, "Skip TLS certificate verification (insecure)")
 }
 
-func (dt *disabledTools) addTools(s *server.MCPServer) {
-	enabledTools := strings.Split(dt.enabledTools, ",")
-	enableWriteTools := !dt.write
-	maybeAddTools(
-		s,
-		func(mcp *server.MCPServer) { grafanatools.AddV84Tools(mcp, enableWriteTools, dt.v84Optional) },
-		enabledTools,
-		dt.v84,
-		"v84",
-	)
+func (tc *toolConfig) addTools(s *server.MCPServer) {
+	grafanatools.AddV84Tools(s, !tc.disableWrite, tc.optionalTools)
 }
 
-func newServer(dt disabledTools, obs *observability.Observability) *server.MCPServer {
+func newServer(tc toolConfig, obs *observability.Observability) *server.MCPServer {
 	hooks := observability.MergeHooks(&server.Hooks{}, obs.MCPHooks())
 
 	s := server.NewMCPServer("mcp-grafana", mcpgrafana.Version(),
@@ -104,7 +78,7 @@ Use only tools returned by list_tools. Some tools can be disabled via flags.
 		server.WithHooks(hooks),
 	)
 
-	dt.addTools(s)
+	tc.addTools(s)
 	return s
 }
 
@@ -180,7 +154,7 @@ func runMetricsServer(addr string, o *observability.Observability) {
 	}
 }
 
-func run(transport, addr, basePath, endpointPath string, logLevel slog.Level, dt disabledTools, gc mcpgrafana.GrafanaConfig, tls tlsConfig, obs observability.Config) error {
+func run(transport, addr, basePath, endpointPath string, logLevel slog.Level, tc toolConfig, gc mcpgrafana.GrafanaConfig, tls tlsConfig, obs observability.Config) error {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevel})))
 
 	// Set up observability (metrics and tracing)
@@ -196,7 +170,7 @@ func run(transport, addr, basePath, endpointPath string, logLevel slog.Level, dt
 		}
 	}()
 
-	s := newServer(dt, o)
+	s := newServer(tc, o)
 
 	// Create a context that will be cancelled on shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -303,8 +277,8 @@ func main() {
 	endpointPath := flag.String("endpoint-path", "/mcp", "Endpoint path for the streamable-http server")
 	logLevel := flag.String("log-level", "info", "Log level (debug, info, warn, error)")
 	showVersion := flag.Bool("version", false, "Print the version and exit")
-	var dt disabledTools
-	dt.addFlags()
+	var tc toolConfig
+	tc.addFlags()
 	var gc grafanaConfig
 	gc.addFlags()
 	var tls tlsConfig
@@ -342,7 +316,7 @@ func main() {
 		obs.NetworkTransport = mcpconv.NetworkTransportTCP
 	}
 
-	if err := run(transport, *addr, *basePath, *endpointPath, parseLevel(*logLevel), dt, grafanaConfig, tls, obs); err != nil {
+	if err := run(transport, *addr, *basePath, *endpointPath, parseLevel(*logLevel), tc, grafanaConfig, tls, obs); err != nil {
 		panic(err)
 	}
 }
