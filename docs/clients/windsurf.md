@@ -2,10 +2,12 @@
 
 This guide helps you set up the `mcp-grafana` server for Windsurf.
 
+This fork is primarily intended for **Grafana v8** deployments and is validated against **Grafana 8.4.7**. Other v8 releases with the same API surface may work, but Grafana v9+ is not the primary target of this repository.
+
 ## Prerequisites
 
 - Windsurf IDE installed
-- Grafana 8.4.7 (or another 8.x release with the same API surface)
+- Grafana v8, ideally 8.4.7
 - `mcp-grafana` binary in your PATH
 
 ## Install the binary
