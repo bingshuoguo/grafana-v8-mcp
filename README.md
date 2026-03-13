@@ -134,6 +134,10 @@ _\* Write tools. Disabled when `--disable-write` is set._
 |------|---------|-------------|
 | `--disable-write` | `false` | Disable write tools (upsert_dashboard, create/update folder, create/patch annotation) |
 | `--enable-optional-tools` | `false` | Enable optional tools (unified alerting, rendering) |
+| `--enable-tools` | | Enable only the listed exact public tool names. Accepts repeated flags or comma-separated values |
+| `--disable-tools` | | Disable the listed exact public tool names. Accepts repeated flags or comma-separated values |
+
+When `--enable-tools` is set, it acts as an allowlist and overrides the default tool set (including `--disable-write`). For example, to expose only read-only tools plus `upsert_dashboard`: `--disable-write --enable-tools=get_health,search_dashboards,upsert_dashboard`.
 
 ### Debug and Logging
 
@@ -374,6 +378,37 @@ Add `--disable-write` to `args` to prevent any write operations:
 ```
 
 This disables 5 write tools (`upsert_dashboard`, `create_folder`, `update_folder`, `create_annotation`, `patch_annotation`) while keeping all 15 read tools available.
+
+#### Tool-Level Filtering
+
+Use exact public tool names with `--enable-tools` and `--disable-tools`:
+
+```json
+{
+  "mcpServers": {
+    "grafana": {
+      "command": "/absolute/path/to/mcp-grafana",
+      "args": [
+        "--enable-tools=get_health,create_folder,get_panel_image",
+        "--disable-tools=create_folder"
+      ],
+      "env": {
+        "GRAFANA_URL": "http://localhost:3000",
+        "GRAFANA_SERVICE_ACCOUNT_TOKEN": "<your service account token>"
+      }
+    }
+  }
+}
+```
+
+Rules:
+
+- `--enable-tools` is a hard allowlist. If set, only those tools are registered.
+- `--disable-tools` is always applied last and removes tools from the final set.
+- Both flags accept repeated usage, for example `--enable-tools get_health --enable-tools search_dashboards`.
+- Tool names must match exact MCP public names such as `get_health` or `search_dashboards`.
+- Unknown tool names are ignored with a warning.
+- `--enable-tools` can explicitly enable tools that would otherwise be excluded by `--disable-write` or `--enable-optional-tools`.
 
 #### Debug Mode
 

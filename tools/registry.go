@@ -1,120 +1,230 @@
 package tools
 
-import "github.com/mark3labs/mcp-go/server"
+import (
+	"log/slog"
+
+	mcpgrafana "github.com/bingshuoguo/grafana-v8-mcp"
+	"github.com/mark3labs/mcp-go/server"
+)
+
+type RegisterOptions struct {
+	EnableWriteTools    bool
+	EnableOptionalTools bool
+	EnableTools         []string
+	EnableToolsSet      bool
+	DisableTools        []string
+	DisableToolsSet     bool
+}
 
 // AddV84Tools registers Grafana 8.4.7 tool contracts.
-func AddV84Tools(m *server.MCPServer, enableWriteTools, enableOptionalTools bool) {
-	registerV84CoreReadTools(m)
-	registerV84CoreReadOnlyExtensions(m)
-	registerV84P1DataTools(m)
+func AddV84Tools(m *server.MCPServer, opts RegisterOptions) {
+	tools, finalNames := filterTools(allV84Tools(), opts)
+	for _, tool := range tools {
+		tool.Register(m)
+	}
+	slog.Info("tool filter applied",
+		"disable_write", !opts.EnableWriteTools,
+		"enable_optional_tools", opts.EnableOptionalTools,
+		"enable_tools_count", len(opts.EnableTools),
+		"disable_tools_count", len(opts.DisableTools),
+		"final_tools_count", len(finalNames))
+	if len(finalNames) == 0 {
+		slog.Warn("no tools registered after applying tool filters")
+	}
+}
 
-	if enableWriteTools {
-		registerV84CoreWriteTools(m)
+func defaultV84Tools(opts RegisterOptions) []mcpgrafana.Tool {
+	tools := append([]mcpgrafana.Tool{}, v84CoreReadTools()...)
+	tools = append(tools, v84CoreReadOnlyExtensions()...)
+	tools = append(tools, v84P1DataTools()...)
+
+	if opts.EnableWriteTools {
+		tools = append(tools, v84CoreWriteTools()...)
 	}
 
-	if enableOptionalTools {
-		registerV84P2OptionalTools(m, enableWriteTools)
+	if opts.EnableOptionalTools {
+		tools = append(tools, v84P2OptionalReadTools()...)
+		if opts.EnableWriteTools {
+			tools = append(tools, v84P2OptionalWriteTools()...)
+		}
+	}
+
+	return tools
+}
+
+func allV84Tools() []mcpgrafana.Tool {
+	tools := append([]mcpgrafana.Tool{}, v84CoreReadTools()...)
+	tools = append(tools, v84CoreReadOnlyExtensions()...)
+	tools = append(tools, v84P1DataTools()...)
+	tools = append(tools, v84CoreWriteTools()...)
+	tools = append(tools, v84P2OptionalReadTools()...)
+	tools = append(tools, v84P2OptionalWriteTools()...)
+	return tools
+}
+
+func filterTools(all []mcpgrafana.Tool, opts RegisterOptions) ([]mcpgrafana.Tool, map[string]struct{}) {
+	allByName := toolSetFromSlice(all)
+	warnUnknown("--enable-tools", uniqueNames(opts.EnableTools), allByName)
+	warnUnknown("--disable-tools", uniqueNames(opts.DisableTools), allByName)
+
+	candidate := defaultV84Tools(opts)
+	if opts.EnableToolsSet {
+		enableSet := uniqueNames(opts.EnableTools)
+		candidate = filterSliceBySet(all, enableSet)
+	}
+
+	disableSet := uniqueNames(opts.DisableTools)
+	filtered := make([]mcpgrafana.Tool, 0, len(candidate))
+	finalNames := make(map[string]struct{}, len(candidate))
+	for _, tool := range candidate {
+		name := tool.Tool.Name
+		if _, disabled := disableSet[name]; disabled {
+			continue
+		}
+		if _, seen := finalNames[name]; seen {
+			continue
+		}
+		filtered = append(filtered, tool)
+		finalNames[name] = struct{}{}
+	}
+
+	return filtered, finalNames
+}
+
+func warnUnknown(flagName string, names map[string]struct{}, known map[string]mcpgrafana.Tool) {
+	for name := range names {
+		if _, ok := known[name]; ok {
+			continue
+		}
+		slog.Warn("unknown tool in "+flagName+"; ignoring", "tool", name)
 	}
 }
 
-func registerV84CoreReadTools(m *server.MCPServer) {
-	GetHealthTool.Register(m)
-	GetCurrentUserTool.Register(m)
-	GetCurrentOrgTool.Register(m)
-	SearchDashboardsTool.Register(m)
-	GetDashboardByUIDTool.Register(m)
-	ListFoldersTool.Register(m)
-	ListDatasourcesTool.Register(m)
-	GetDatasourceTool.Register(m)
-	ResolveDatasourceRefTool.Register(m)
-	QueryDatasourceTool.Register(m)
-	QueryDatasourceExpressionsTool.Register(m)
-	QueryPrometheusTool.Register(m)
-	ListPrometheusLabelValuesTool.Register(m)
-	ListPrometheusMetricNamesTool.Register(m)
-	GetAnnotationsTool.Register(m)
-	ListLegacyAlertsTool.Register(m)
-	ListLegacyNotificationChannelsTool.Register(m)
-	ListOrgUsersTool.Register(m)
-	ListTeamsTool.Register(m)
-}
-
-// registerV84CoreReadOnlyExtensions registers P0 read-only extension tools.
-func registerV84CoreReadOnlyExtensions(m *server.MCPServer) {
-	// Compat aliases
-	GetDatasourceByUIDTool.Register(m)
-	GetDatasourceByNameTool.Register(m)
-	ListUsersByOrgTool.Register(m)
-
-	// Folder search
-	SearchFoldersTool.Register(m)
-
-	// Dashboard helpers
-	GetDashboardPanelQueriesTool.Register(m)
-	GetDashboardPropertyTool.Register(m)
-	GetDashboardSummaryTool.Register(m)
-	GetDashboardVersionsTool.Register(m)
-
-	// Annotation extras (read)
-	GetAnnotationTagsTool.Register(m)
-
-	// Navigation & examples
-	GenerateDeeplinkTool.Register(m)
-	GetQueryExamplesTool.Register(m)
-}
-
-// registerV84P1DataTools registers P1 datasource-specific tools.
-func registerV84P1DataTools(m *server.MCPServer) {
-	// Prometheus extras
-	ListPrometheusLabelNamesTool.Register(m)
-	ListPrometheusMetricMetadataTool.Register(m)
-	QueryPrometheusHistogramTool.Register(m)
-
-	// Loki (5 tools, ID-based proxy)
-	ListLokiLabelNamesTool.Register(m)
-	ListLokiLabelValuesTool.Register(m)
-	QueryLokiLogsTool.Register(m)
-	QueryLokiStatsTool.Register(m)
-	QueryLokiPatternsTool.Register(m)
-
-	// ClickHouse (3 tools)
-	QueryClickHouseTool.Register(m)
-	ListClickHouseTablesTool.Register(m)
-	DescribeClickHouseTableTool.Register(m)
-
-	// Cross-datasource log search
-	SearchLogsTool.Register(m)
-}
-
-// registerV84P2OptionalTools registers optional P2 tools gated by enableOptionalTools.
-// These require Unified Alerting (Ruler API) or image-renderer to be available.
-func registerV84P2OptionalTools(m *server.MCPServer, enableWriteTools bool) {
-	// Unified Alerting read tools
-	ListAlertRulesTool.Register(m)
-	GetAlertRuleByUIDTool.Register(m)
-	ListContactPointsTool.Register(m)
-	GetFiringAlertsTool.Register(m)
-	GetAlertRulesWithStateTool.Register(m)
-
-	// Unified Alerting write tools
-	if enableWriteTools {
-		CreateAlertRuleTool.Register(m)
-		UpdateAlertRuleTool.Register(m)
-		DeleteAlertRuleTool.Register(m)
+func filterSliceBySet(all []mcpgrafana.Tool, allow map[string]struct{}) []mcpgrafana.Tool {
+	filtered := make([]mcpgrafana.Tool, 0, len(allow))
+	seen := make(map[string]struct{}, len(allow))
+	for _, tool := range all {
+		name := tool.Tool.Name
+		if _, ok := allow[name]; !ok {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		filtered = append(filtered, tool)
+		seen[name] = struct{}{}
 	}
-
-	// Rendering
-	GetPanelImageTool.Register(m)
+	return filtered
 }
 
-func registerV84CoreWriteTools(m *server.MCPServer) {
-	UpsertDashboardTool.Register(m)
-	UpdateDashboardTool.Register(m) // compat alias
-	CreateFolderTool.Register(m)
-	UpdateFolderTool.Register(m)
-	CreateAnnotationTool.Register(m)
-	PatchAnnotationTool.Register(m)
-	UpdateAnnotationTool.Register(m)
-	CreateGraphiteAnnotationTool.Register(m)
-	DeleteAnnotationTool.Register(m)
+func uniqueNames(names []string) map[string]struct{} {
+	if len(names) == 0 {
+		return nil
+	}
+	unique := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		unique[name] = struct{}{}
+	}
+	return unique
+}
+
+func toolSetFromSlice(tools []mcpgrafana.Tool) map[string]mcpgrafana.Tool {
+	byName := make(map[string]mcpgrafana.Tool, len(tools))
+	for _, tool := range tools {
+		byName[tool.Tool.Name] = tool
+	}
+	return byName
+}
+
+func v84CoreReadTools() []mcpgrafana.Tool {
+	return []mcpgrafana.Tool{
+		GetHealthTool,
+		GetCurrentUserTool,
+		GetCurrentOrgTool,
+		SearchDashboardsTool,
+		GetDashboardByUIDTool,
+		ListFoldersTool,
+		ListDatasourcesTool,
+		GetDatasourceTool,
+		ResolveDatasourceRefTool,
+		QueryDatasourceTool,
+		QueryDatasourceExpressionsTool,
+		QueryPrometheusTool,
+		ListPrometheusLabelValuesTool,
+		ListPrometheusMetricNamesTool,
+		GetAnnotationsTool,
+		ListLegacyAlertsTool,
+		ListLegacyNotificationChannelsTool,
+		ListOrgUsersTool,
+		ListTeamsTool,
+	}
+}
+
+func v84CoreReadOnlyExtensions() []mcpgrafana.Tool {
+	return []mcpgrafana.Tool{
+		GetDatasourceByUIDTool,
+		GetDatasourceByNameTool,
+		ListUsersByOrgTool,
+		SearchFoldersTool,
+		GetDashboardPanelQueriesTool,
+		GetDashboardPropertyTool,
+		GetDashboardSummaryTool,
+		GetDashboardVersionsTool,
+		GetAnnotationTagsTool,
+		GenerateDeeplinkTool,
+		GetQueryExamplesTool,
+	}
+}
+
+func v84P1DataTools() []mcpgrafana.Tool {
+	return []mcpgrafana.Tool{
+		ListPrometheusLabelNamesTool,
+		ListPrometheusMetricMetadataTool,
+		QueryPrometheusHistogramTool,
+		ListLokiLabelNamesTool,
+		ListLokiLabelValuesTool,
+		QueryLokiLogsTool,
+		QueryLokiStatsTool,
+		QueryLokiPatternsTool,
+		QueryClickHouseTool,
+		ListClickHouseTablesTool,
+		DescribeClickHouseTableTool,
+		SearchLogsTool,
+	}
+}
+
+func v84P2OptionalReadTools() []mcpgrafana.Tool {
+	return []mcpgrafana.Tool{
+		ListAlertRulesTool,
+		GetAlertRuleByUIDTool,
+		ListContactPointsTool,
+		GetFiringAlertsTool,
+		GetAlertRulesWithStateTool,
+		GetPanelImageTool,
+	}
+}
+
+func v84P2OptionalWriteTools() []mcpgrafana.Tool {
+	return []mcpgrafana.Tool{
+		CreateAlertRuleTool,
+		UpdateAlertRuleTool,
+		DeleteAlertRuleTool,
+	}
+}
+
+func v84CoreWriteTools() []mcpgrafana.Tool {
+	return []mcpgrafana.Tool{
+		UpsertDashboardTool,
+		UpdateDashboardTool,
+		CreateFolderTool,
+		UpdateFolderTool,
+		CreateAnnotationTool,
+		PatchAnnotationTool,
+		UpdateAnnotationTool,
+		CreateGraphiteAnnotationTool,
+		DeleteAnnotationTool,
+	}
 }

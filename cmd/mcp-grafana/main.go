@@ -22,8 +22,10 @@ import (
 
 // toolConfig controls which tool categories are registered.
 type toolConfig struct {
-	disableWrite    bool
-	optionalTools   bool
+	disableWrite  bool
+	optionalTools bool
+	enableTools   toolNameList
+	disableTools  toolNameList
 }
 
 // Configuration for the Grafana client.
@@ -41,6 +43,8 @@ type grafanaConfig struct {
 func (tc *toolConfig) addFlags() {
 	flag.BoolVar(&tc.disableWrite, "disable-write", false, "Disable write tools (create/update operations)")
 	flag.BoolVar(&tc.optionalTools, "enable-optional-tools", false, "Enable optional tools (unified alerting, rendering)")
+	flag.Var(&tc.enableTools, "enable-tools", "Enable only the specified exact public tool names. Accepts repeated flags or comma-separated values")
+	flag.Var(&tc.disableTools, "disable-tools", "Disable the specified exact public tool names. Accepts repeated flags or comma-separated values")
 }
 
 func (gc *grafanaConfig) addFlags() {
@@ -54,7 +58,14 @@ func (gc *grafanaConfig) addFlags() {
 }
 
 func (tc *toolConfig) addTools(s *server.MCPServer) {
-	grafanatools.AddV84Tools(s, !tc.disableWrite, tc.optionalTools)
+	grafanatools.AddV84Tools(s, grafanatools.RegisterOptions{
+		EnableWriteTools:    !tc.disableWrite,
+		EnableOptionalTools: tc.optionalTools,
+		EnableTools:         tc.enableTools.Values(),
+		EnableToolsSet:      tc.enableTools.IsSet(),
+		DisableTools:        tc.disableTools.Values(),
+		DisableToolsSet:     tc.disableTools.IsSet(),
+	})
 }
 
 func newServer(tc toolConfig, obs *observability.Observability) *server.MCPServer {

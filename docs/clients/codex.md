@@ -129,3 +129,23 @@ command = "mcp-grafana"
 args = ["--disable-write"]
 env = { GRAFANA_URL = "http://localhost:3000", GRAFANA_SERVICE_ACCOUNT_TOKEN = "<your-token>" }
 ```
+
+## Tool-level filtering
+
+```toml
+[mcp_servers.grafana]
+command = "mcp-grafana"
+args = [
+  "--enable-tools=get_health,create_folder,get_panel_image",
+  "--disable-tools=create_folder",
+]
+env = { GRAFANA_URL = "http://localhost:3000", GRAFANA_SERVICE_ACCOUNT_TOKEN = "<your-token>" }
+```
+
+Use exact public tool names only. Both flags also support repeated entries, for example multiple `--enable-tools` items in the `args` array.
+
+**Allowlist overrides disable-write:** When you set `--enable-tools`, only those tools are registered, so you can expose specific write tools even with `--disable-write`:
+
+```toml
+args = ["--disable-write", "--enable-tools=get_health,search_dashboards,upsert_dashboard"]
+```
