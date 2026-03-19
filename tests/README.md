@@ -16,7 +16,8 @@ Tests use [`uv`] for dependency management and `deepeval` for the LLM-driven sce
 
 - Docker installed and running
 - local Grafana test services started
-- API keys for the LLM providers used by the test suite
+- API keys for the LLM providers used by the test suite if you want to run the
+  LLM-driven scenarios
 
 ## Setup
 
@@ -47,6 +48,9 @@ Tests use [`uv`] for dependency management and `deepeval` for the LLM-driven sce
    ```bash
    uv run pytest
    ```
+
+If `OPENAI_API_KEY` and/or `ANTHROPIC_API_KEY` are not set, the matching
+LLM-driven test cases are skipped automatically.
 
 ## Notes
 
