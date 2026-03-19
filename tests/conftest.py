@@ -37,6 +37,37 @@ async def cleanup_sessions():
     await asyncio.sleep(0.01)
 
 
+def _has_model_api_key(model: str) -> bool:
+    if model.startswith("anthropic/"):
+        return bool(os.environ.get("ANTHROPIC_API_KEY"))
+    if model.startswith("gpt-") or model.startswith("openai/"):
+        return bool(os.environ.get("OPENAI_API_KEY"))
+    return True
+
+
+@pytest.fixture(autouse=True)
+def skip_missing_model_credentials(request: pytest.FixtureRequest):
+    callspec = getattr(request.node, "callspec", None)
+    if callspec is None:
+        return
+
+    model = callspec.params.get("model")
+    if not isinstance(model, str):
+        return
+
+    if _has_model_api_key(model):
+        return
+
+    if model.startswith("anthropic/"):
+        provider = "ANTHROPIC_API_KEY"
+    elif model.startswith("gpt-") or model.startswith("openai/"):
+        provider = "OPENAI_API_KEY"
+    else:
+        provider = "provider API key"
+
+    pytest.skip(f"Skipping model {model}: missing {provider}")
+
+
 @pytest.fixture
 def mcp_transport():
     return os.environ.get("MCP_TRANSPORT", DEFAULT_MCP_TRANSPORT)
