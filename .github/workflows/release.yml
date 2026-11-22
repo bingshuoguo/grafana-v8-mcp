@@ -5,6 +5,16 @@ on:
     # run only against tags
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to release (published releases are skipped)
+        required: true
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -12,16 +22,44 @@ permissions:
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
     steps:
+      - name: Check whether the release is already published
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A tag can be pushed again after a history rewrite. Published releases
+          # are complete: do not rebuild or upload their existing assets again.
+          PUBLISHED=$(gh api graphql \
+            -f query='query($owner: String!, $name: String!, $tag: String!) {
+              repository(owner: $owner, name: $name) {
+                release(tagName: $tag) { isDraft }
+              }
+            }' \
+            -f owner="${GITHUB_REPOSITORY%/*}" \
+            -f name="${GITHUB_REPOSITORY#*/}" \
+            -f tag="$RELEASE_TAG" \
+            --jq '.data.repository.release | . != null and .isDraft == false')
+          echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
+          if [ "$PUBLISHED" = true ]; then
+            echo "Release $RELEASE_TAG is already published; skipping duplicate publication." \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Checkout
+        if: steps.release.outputs.published != 'true'
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Extract release notes from CHANGELOG.md
+        if: steps.release.outputs.published != 'true'
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          VERSION=${RELEASE_TAG#v}
           # Extract the section for this version from CHANGELOG.md.
           # Matches from "## [X.Y.Z]" until the next "## [" or end of file,
           # excluding the heading itself and any trailing link references.
@@ -39,7 +77,7 @@ jobs:
 
           # If CHANGELOG.md is missing or has no section for this version, fall back
           if [ ! -s /tmp/release-notes.md ]; then
-            echo "Release ${GITHUB_REF_NAME}" > /tmp/release-notes.md
+            echo "Release ${RELEASE_TAG}" > /tmp/release-notes.md
           fi
 
           cat <<EOF >> /tmp/release-notes.md
@@ -59,6 +97,7 @@ jobs:
           EOF
 
       - name: Set up Go
+        if: steps.release.outputs.published != 'true'
         uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5 # v6.2.0
         with:
           go-version: stable
@@ -66,6 +105,7 @@ jobs:
           cache: false
 
       - name: Run GoReleaser
+        if: steps.release.outputs.published != 'true'
         uses: goreleaser/goreleaser-action@4247c53b304edb39a4e6a0808f415d3eebad450a
         with:
           distribution: goreleaser
